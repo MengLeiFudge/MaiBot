@@ -1,0 +1,22 @@
+[plugin]
+enabled = false
+config_version = "0.1.2"
+
+[listener]
+host = "127.0.0.1"
+port = 8080
+account_self_id = "1443944862"
+owner_self_id = "1443944862"
+request_max_bytes = 1048576
+
+[publishing]
+allowed_roots = ["/mnt/d/project"]
+max_artifact_bytes = 536870912
+max_zip_entries = 10000
+max_uncompressed_bytes = 2147483648
+publish_max_age_seconds = 300
+lock_timeout_seconds = 30.0
+api_timeout_seconds = 900.0
+
+[storage]
+runtime_root_override = ""

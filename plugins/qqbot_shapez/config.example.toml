@@ -1,0 +1,10 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[cutover]
+write_enabled = true
+
+[storage]
+# Leave empty to use the SDK-provided plugin runtime directory.
+cache_root_override = ""

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-common",
+  "version": "0.1.2",
+  "name": "QQBot 迁移公共能力",
+  "description": "为拆分后的 QQBot 功能插件提供机器人入站门禁、多账号命令仲裁、昵称缓存和迁移数据路径。",
+  "author": {
+    "name": "MLJ",
+    "url": "https://github.com/MengLeiFudge"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {
+    "min_version": "1.1.0",
+    "max_version": "1.1.99"
+  },
+  "sdk": {
+    "min_version": "2.7.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": [],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": ["zh-CN"]
+  },
+  "plugin_type": "extension"
+}

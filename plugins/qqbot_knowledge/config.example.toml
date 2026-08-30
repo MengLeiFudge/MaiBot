@@ -1,0 +1,88 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[search]
+max_results = 4
+max_chars = 2600
+max_files_per_domain = 80
+max_file_bytes = 220000
+max_query_chars = 2000
+timeout_seconds = 3.0
+refresh_seconds = 600
+cache_ttl_seconds = 600
+cache_max_entries = 128
+
+[scope]
+# Empty means no group whitelist. Group facts are never inferred from session_id text.
+enabled_group_ids = []
+session_ttl_seconds = 600
+session_max_entries = 1024
+
+[[sources.roots]]
+domain = "dsp-vanilla"
+path = "D:/project/dsp/DSPCore/DSPCore"
+
+[[sources.roots]]
+domain = "dsp-vanilla"
+path = "D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/Assembly-CSharp"
+
+[[sources.roots]]
+domain = "fractionate-everything"
+path = "D:/project/dsp/MLJ_DSPmods/FractionateEverything/src"
+
+[[sources.roots]]
+domain = "fractionate-everything"
+path = "D:/project/dsp/MLJ_DSPmods/FractionateEverything/README.md"
+
+[[sources.roots]]
+domain = "dsp-mod-tools"
+path = "D:/project/dsp/MLJ_DSPmods/SaveDataExporter"
+
+[[sources.roots]]
+domain = "dsp-mod-tools"
+path = "D:/project/dsp/MLJ_DSPmods/UXAEnhance"
+
+[[sources.roots]]
+domain = "dsp-mod-tools"
+path = "D:/project/dsp/MLJ_DSPmods/AfterBuildEvent"
+
+[[sources.roots]]
+domain = "dsp-mod-tools"
+path = "D:/project/dsp/MLJ_DSPmods/GetDspData"
+
+[[sources.roots]]
+domain = "dsp-mod-tools"
+path = "D:/project/dsp/MLJ_DSPmods/VanillaCurveSim"
+
+[[sources.roots]]
+domain = "orbital-ring"
+path = "D:/project/dsp/OrbitalRing-MOD"
+
+[[sources.roots]]
+domain = "orbital-ring"
+path = "D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/ProjectOrbitalRing"
+
+[[sources.roots]]
+domain = "project-genesis"
+path = "D:/project/dsp/ProjectGenesis"
+
+[[sources.roots]]
+domain = "project-genesis"
+path = "D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/ProjectGenesis"
+
+[[sources.roots]]
+domain = "shapez"
+path = "D:/project/shapez/DecompiledSource/Game.Content"
+
+[[sources.roots]]
+domain = "shapez"
+path = "D:/project/shapez/shapez-mods/src"
+
+[[sources.roots]]
+domain = "shapez"
+path = "D:/project/shapez/shapezPathAnalyzer/shapezAnalyzer"
+
+[[sources.roots]]
+domain = "factorio"
+path = "D:/project/factorio/MLJ_Factorio_Mods"

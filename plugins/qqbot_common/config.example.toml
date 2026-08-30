@@ -1,0 +1,12 @@
+[plugin]
+enabled = false
+config_version = "0.1.2"
+
+[storage]
+legacy_runtime_root = ""
+coordination_db_name = "maibot_coordination.sqlite3"
+
+[routing]
+bot_account_ids = []
+claim_ttl_seconds = 12
+claim_bucket_seconds = 4

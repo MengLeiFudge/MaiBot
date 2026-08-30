@@ -1,0 +1,27 @@
+[plugin]
+enabled = false
+config_version = "0.2.0"
+admin_user_ids = ["605738729"]
+
+[storage]
+runtime_root = ""
+
+[auto_send]
+enabled = true
+max_text_chars = 80
+recent_history_size = 8
+safe_categories = ["affection_kiss", "agreement_yes", "angry", "angry_dislike", "apology_sorry", "awkward_silence", "baka", "boss_feed", "boss_worship", "color", "confused", "confused_question", "cpu", "cute_begging_trade", "fear_panic", "food_eat", "fool", "funny_laugh", "game_invite", "givemoney", "happy", "happy_cheer", "hug_comfort", "like", "meow", "morning", "no_need", "polite_awkward_smile", "reject_no", "reply", "rhythm_game_pressure", "sad", "sad_cry", "see", "self_noob", "shocked_surprise", "shy", "shy_flirt", "sigh", "slap_warning", "sleep", "sleep_rest", "surprised", "tired_defeated", "touch_rua", "troll_funny", "work"]
+
+[webui]
+bind_host = "127.0.0.1"
+port = 5000
+
+[remote]
+provider = ""
+stardots_key = ""
+stardots_secret = ""
+stardots_space = "memes"
+r2_account_id = ""
+r2_access_key_id = ""
+r2_secret_access_key = ""
+r2_bucket_name = ""

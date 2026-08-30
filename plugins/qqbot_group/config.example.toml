@@ -1,0 +1,37 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[social]
+enabled = true
+auto_approve_friend_requests = true
+auto_approve_group_invites = true
+owner_qq = "605738729"
+
+[welcome]
+enabled = true
+bot_account_ids = ["1443944862", "2629227874", "3056830689", "3109326090"]
+
+[welcome.bot_display_names]
+"1443944862" = "云栖"
+"2629227874" = "夜凛"
+"3056830689" = "星遥"
+"3109326090" = "月澄"
+
+[welcome.templates]
+"1443944862" = " 欢迎大佬喵！{expression}"
+"2629227874" = " 来了个大佬，{expression}"
+"3056830689" = " 新朋友来啦，{expression}"
+"3109326090" = " 欢迎来到这里，{expression}"
+
+[cleanup]
+write_enabled = true
+owner_qq = "605738729"
+old_file_grace_days = 7
+fetch_count = 10000
+message_interval_seconds = 1.0
+timezone = "Asia/Shanghai"
+
+[storage]
+runtime_root_override = ""
+database_path = "db/qqbot_features.sqlite3"

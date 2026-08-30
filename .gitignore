@@ -386,3 +386,27 @@ agentlite/
 /qwen_mai/
 /MaiMaiFocusPet-Godot/
 start_mac.command
+
+# 夜凛 deployment：仅跟踪迁入插件源码和脱敏示例，运行配置仍留在本机。
+/plugins/*
+!/plugins/napcat_adapter/
+!/plugins/napcat_adapter/**
+!/plugins/qqbot_*/
+!/plugins/qqbot_*/**
+/plugins/qqbot_*/tests/
+/plugins/**/config.toml
+/plugins/**/*.db
+/plugins/**/*.db-shm
+/plugins/**/*.db-wal
+/plugins/**/.env
+/plugins/**/.env.*
+/plugins/**/__pycache__/
+/plugins/**/*.py[cod]
+/.runtime/
+/.venv/
+/config/
+/data/
+/logs/
+*.key
+*.pem
+*.p12

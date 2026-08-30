@@ -1,0 +1,10 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[state]
+cooldown_seconds = 120.0
+duplicate_window_seconds = 3.0
+
+[routing]
+bot_account_ids = ["1443944862", "2629227874", "3056830689", "3109326090"]

@@ -1,0 +1,6 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[quote]
+max_nearby_messages = 5

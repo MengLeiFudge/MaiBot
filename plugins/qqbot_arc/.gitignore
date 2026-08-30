@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+*.apk
+.qqbot-arc-apk-*.tmp/
+.agent-reference/

@@ -1,0 +1,22 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[sub2api]
+base_url = ""
+admin_api_key = ""
+timeout_seconds = 90
+refresh_interval_seconds = 300
+
+[codexradar]
+enabled = true
+url = "https://codexradar.com/data/intelligence-efficiency.json"
+timeout_seconds = 10
+refresh_interval_seconds = 300
+
+[alerts]
+enabled = false
+group_ids = []
+
+[storage]
+cache_root_override = ""

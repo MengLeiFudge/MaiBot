@@ -1,0 +1,13 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[permissions]
+owner_qq = "605738729"
+
+[api]
+endpoint = "https://api.lolicon.app/setu/v2"
+timeout_seconds = 20
+
+[storage]
+runtime_root_override = ""

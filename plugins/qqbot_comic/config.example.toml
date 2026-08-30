@@ -1,0 +1,21 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[storage]
+runtime_root_override = ""
+
+[download]
+proxy = ""
+timeout_seconds = 1800
+max_pages_per_pdf = 500
+max_pdf_size_mb = 100
+max_concurrent_jobs = 2
+max_queued_jobs = 50
+cache_max_gb = 10
+
+[routing]
+expected_workers = 1
+rendezvous_wait_seconds = 1.5
+preferred_self_id = ""
+bot_account_ids = []

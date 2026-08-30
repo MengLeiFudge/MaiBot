@@ -1,0 +1,7 @@
+/config.toml
+/.agent-reference/
+/__pycache__/
+/.pytest_cache/
+/.ruff_cache/
+/logs/
+*.py[cod]

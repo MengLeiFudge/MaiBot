@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-knowledge",
+  "version": "0.1.0",
+  "name": "QQBot Source Knowledge",
+  "description": "Injects bounded local source evidence into one MaiBot replyer request.",
+  "author": {
+    "name": "MLJ",
+    "url": "https://github.com/MengLeiFudge"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {
+    "min_version": "1.1.0",
+    "max_version": "1.1.99"
+  },
+  "sdk": {
+    "min_version": "2.7.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": [],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": ["zh-CN"]
+  },
+  "plugin_type": "extension"
+}

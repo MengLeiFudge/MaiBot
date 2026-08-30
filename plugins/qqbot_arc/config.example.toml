@@ -1,0 +1,56 @@
+[plugin]
+enabled = false
+config_version = "0.4.0"
+
+[cutover]
+write_enabled = true
+
+[storage]
+runtime_root_override = ""
+database_path = ""
+cache_root = ""
+# 留空时使用当前插件 self.ctx.paths.runtime_dir 下的 qqbot_arc 子目录。
+
+[assets]
+# 留空时从 qqbot.storage.runtime_root 返回值下的 data/arc 读取。
+assets_root = ""
+# 可选只读静态别名文件；不作为运行状态写入。
+aliases_path = ""
+timezone = "Asia/Shanghai"
+session_timeout_seconds = 300
+
+[apk]
+author_qq = "605738729"
+# arcaeaRecord Maven 项目目录；xz/arcxz 下载需要填写。
+arcaea_record_root = ""
+# 留空时使用当前插件 runtime_dir 下的 qqbot_arc/apk。
+artifact_root = ""
+maven_command = ""
+java_home = ""
+version_query_timeout_seconds = 20.0
+compile_timeout_seconds = 180.0
+download_timeout_seconds = 900.0
+
+[artifact_publish]
+enabled = true
+endpoint = "http://127.0.0.1:8080/admin/api/artifacts/publish-local"
+timeout_seconds = 300.0
+
+[background]
+enabled = true
+loop_interval_seconds = 60.0
+aliases_enabled = true
+constants_enabled = true
+version_check_enabled = true
+guess_expiration_enabled = true
+activity_reminders_enabled = true
+alias_sync_interval_hours = 24.0
+constants_sync_interval_hours = 24.0
+version_check_interval_hours = 12.0
+activity_check_interval_hours = 1.0
+# 留空时使用当前 bot 的群列表；也可填写固定目标群号。
+reminder_group_ids = []
+
+[routing]
+# 所有可见机器人账号都应列在这里，防止机器人输出触发猜歌。
+bot_account_ids = []
