@@ -459,7 +459,7 @@ check_eula() {
 
     # 如果EULA或隐私条款有更新，提示用户重新确认
     if [[ $current_md5 != $confirmed_md5 || $current_md5_privacy != $confirmed_md5_privacy ]]; then
-        whiptail --title "📜 使用协议更新" --yesno "检测到MaiCore EULA或隐私条款已更新。\nhttps://github.com/MaiM-with-u/MaiBot/blob/refactor/EULA.md\nhttps://github.com/MaiM-with-u/MaiBot/blob/refactor/PRIVACY.md\n\n您是否同意上述协议？ \n\n " 12 70
+        whiptail --title "📜 使用协议更新" --yesno "检测到MaiCore EULA或隐私条款已更新。\nhttps://github.com/Mai-with-u/MaiBot/blob/refactor/EULA.md\nhttps://github.com/Mai-with-u/MaiBot/blob/refactor/PRIVACY.md\n\n您是否同意上述协议？ \n\n " 12 70
         if [[ $? -eq 0 ]]; then
             echo -n "$current_md5" > "${INSTALL_DIR}/MaiBot/eula.confirmed"
             echo -n "$current_md5_privacy" > "${INSTALL_DIR}/MaiBot/privacy.confirmed"
@@ -594,7 +594,7 @@ run_installation() {
     whiptail --title "ℹ️ 提示" --msgbox "如果您没有特殊需求，请优先使用docker方式部署。" 10 60
 
     # 协议确认
-    if ! (whiptail --title "ℹ️ [1/6] 使用协议" --yes-button "我同意" --no-button "我拒绝" --yesno "使用MaiCore及此脚本前请先阅读EULA协议及隐私协议\nhttps://github.com/MaiM-with-u/MaiBot/blob/refactor/EULA.md\nhttps://github.com/MaiM-with-u/MaiBot/blob/refactor/PRIVACY.md\n\n您是否同意上述协议？" 12 70); then
+    if ! (whiptail --title "ℹ️ [1/6] 使用协议" --yes-button "我同意" --no-button "我拒绝" --yesno "使用MaiCore及此脚本前请先阅读EULA协议及隐私协议\nhttps://github.com/Mai-with-u/MaiBot/blob/refactor/EULA.md\nhttps://github.com/Mai-with-u/MaiBot/blob/refactor/PRIVACY.md\n\n您是否同意上述协议？" 12 70); then
         exit 1
     fi
 
@@ -826,7 +826,7 @@ run_installation() {
     source venv/bin/activate
 
     echo -e "${GREEN}克隆MaiCore仓库...${RESET}"
-    git clone -b "$BRANCH" "$GITHUB_REPO/MaiM-with-u/MaiBot" MaiBot || {
+    git clone -b "$BRANCH" "$GITHUB_REPO/Mai-with-u/MaiBot" MaiBot || {
         echo -e "${RED}克隆MaiCore仓库失败！${RESET}"
         exit 1
     }

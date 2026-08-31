@@ -3,8 +3,8 @@ param()
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$UpstreamRepository = "https://github.com/MaiM-with-u/MaiBot.git"
-$LatestReleaseApi = "https://api.github.com/repos/MaiM-with-u/MaiBot/releases/latest"
+$UpstreamRepository = "https://github.com/Mai-with-u/MaiBot.git"
+$LatestReleaseApi = "https://api.github.com/repos/Mai-with-u/MaiBot/releases/latest"
 
 $git = Get-Command git -ErrorAction SilentlyContinue
 if ($null -eq $git) {

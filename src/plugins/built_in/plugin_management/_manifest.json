@@ -5,14 +5,14 @@
   "description": "通过系统 API 管理插件和组件的生命周期，包括加载、卸载、启用和禁用等操作。",
   "author": {
     "name": "MaiBot团队",
-    "url": "https://github.com/MaiM-with-u"
+    "url": "https://github.com/Mai-with-u"
   },
   "license": "GPL-v3.0-or-later",
   "urls": {
-    "repository": "https://github.com/MaiM-with-u/maibot",
-    "homepage": "https://github.com/MaiM-with-u/maibot",
-    "documentation": "https://github.com/MaiM-with-u/maibot",
-    "issues": "https://github.com/MaiM-with-u/maibot/issues"
+    "repository": "https://github.com/Mai-with-u/MaiBot",
+    "homepage": "https://github.com/Mai-with-u/MaiBot",
+    "documentation": "https://github.com/Mai-with-u/MaiBot",
+    "issues": "https://github.com/Mai-with-u/MaiBot/issues"
   },
   "host_application": {
     "min_version": "1.0.0",

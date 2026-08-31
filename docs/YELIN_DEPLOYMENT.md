@@ -40,4 +40,4 @@ NapCat 不由本项目启动。外层编排负责启动 NapCat；本项目唯一
 ./scripts/update.ps1
 ```
 
-脚本从 GitHub `latest Release` API 获取官方 `MaiM-with-u/MaiBot` 的最新非 draft、非 prerelease tag，显式从 `upstream` 获取该 tag，合入 `deployment`，最后执行 `uv sync --frozen`。脚本不会更新 NapCat、不会切换分支，也不会 push；合入后的审查和推送由维护者另行处理。
+脚本从 GitHub `latest Release` API 获取官方 `Mai-with-u/MaiBot` 的最新非 draft、非 prerelease tag，显式从 `upstream` 获取该 tag，合入 `deployment`，最后执行 `uv sync --frozen`。脚本不会更新 NapCat、不会切换分支，也不会 push；合入后的审查和推送由维护者另行处理。

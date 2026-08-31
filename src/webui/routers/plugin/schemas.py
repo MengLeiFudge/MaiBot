@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class FetchRawFileRequest(BaseModel):
-    owner: str = Field(..., description="仓库所有者", examples=["MaiM-with-u"])
+    owner: str = Field(..., description="仓库所有者", examples=["Mai-with-u"])
     repo: str = Field(..., description="仓库名称", examples=["plugin-repo"])
     branch: str = Field(..., description="分支名称", examples=["main"])
     file_path: str = Field(..., description="文件路径", examples=["plugin_details.json"])
@@ -22,7 +22,7 @@ class FetchRawFileResponse(BaseModel):
 
 
 class CloneRepositoryRequest(BaseModel):
-    owner: str = Field(..., description="仓库所有者", examples=["MaiM-with-u"])
+    owner: str = Field(..., description="仓库所有者", examples=["Mai-with-u"])
     repo: str = Field(..., description="仓库名称", examples=["plugin-repo"])
     target_path: str = Field(..., description="目标路径（相对于插件目录）")
     branch: Optional[str] = Field(None, description="分支名称", examples=["main"])

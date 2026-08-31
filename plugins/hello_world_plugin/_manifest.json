@@ -5,14 +5,14 @@
   "description": "我的第一个 MaiCore 插件，包含问候功能和时间查询等基础示例",
   "author": {
     "name": "MaiBot开发团队",
-    "url": "https://github.com/MaiM-with-u"
+    "url": "https://github.com/Mai-with-u"
   },
   "license": "GPL-v3.0-or-later",
   "urls": {
-    "repository": "https://github.com/MaiM-with-u/maibot",
-    "homepage": "https://github.com/MaiM-with-u/maibot",
-    "documentation": "https://github.com/MaiM-with-u/maibot",
-    "issues": "https://github.com/MaiM-with-u/maibot/issues"
+    "repository": "https://github.com/Mai-with-u/MaiBot",
+    "homepage": "https://github.com/Mai-with-u/MaiBot",
+    "documentation": "https://github.com/Mai-with-u/MaiBot",
+    "issues": "https://github.com/Mai-with-u/MaiBot/issues"
   },
   "changelog": "CHANGELOG.md",
   "host_application": {

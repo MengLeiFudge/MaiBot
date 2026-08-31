@@ -125,8 +125,8 @@ Contributions are welcome. Please read the [Contribution Guide](CONTRIBUTE.md) f
 
 ### 🌟 Contributors
 
-<a href="https://github.com/MaiM-with-u/MaiBot/graphs/contributors">
-  <img alt="contributors" src="https://contrib.rocks/image?repo=MaiM-with-u/MaiBot" />
+<a href="https://github.com/Mai-with-u/MaiBot/graphs/contributors">
+  <img alt="contributors" src="https://contrib.rocks/image?repo=Mai-with-u/MaiBot" />
 </a>
 
 ### 🤝 Open Source Friends

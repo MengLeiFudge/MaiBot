@@ -125,8 +125,8 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 
 ### 🌟 贡献者
 
-<a href="https://github.com/MaiM-with-u/MaiBot/graphs/contributors">
-  <img alt="contributors" src="https://contrib.rocks/image?repo=MaiM-with-u/MaiBot" />
+<a href="https://github.com/Mai-with-u/MaiBot/graphs/contributors">
+  <img alt="contributors" src="https://contrib.rocks/image?repo=Mai-with-u/MaiBot" />
 </a>
 
 ### 🤝 开源项目友链
