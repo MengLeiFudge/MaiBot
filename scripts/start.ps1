@@ -109,6 +109,7 @@ try {
     $startedProcess = Start-Process -FilePath $uv.Source `
         -ArgumentList @("run", "--no-sync", "python", $botPathArgument) `
         -WorkingDirectory $ProjectRoot `
+        -WindowStyle Hidden `
         -RedirectStandardOutput $StdoutLog `
         -RedirectStandardError $StderrLog `
         -PassThru
