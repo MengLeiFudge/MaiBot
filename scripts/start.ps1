@@ -7,6 +7,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $RuntimeDirectory = Join-Path $ProjectRoot ".runtime"
 $PidFile = Join-Path $RuntimeDirectory "maibot.pid"
