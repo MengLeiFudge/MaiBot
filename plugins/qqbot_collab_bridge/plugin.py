@@ -104,9 +104,9 @@ class QQBotCollabBridge(MaiBotPlugin):
         params = {"user_id" if private else "group_id": target, "message": [{"type": "text", "data": {"text": body}}]}
         require_api_result(await self.ctx.api.call(name, params=params), "桥接回传")
 
-    @HookHandler("chat.receive.before_process", name="qqbot_collab_bridge", description="显式协作需求与主人确认", mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=10000, error_policy=ErrorPolicy.SKIP)
+    @HookHandler("chat.receive.before_process", name="qqbot_collab_bridge", description="旁路收集@消息与处理主人确认", mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=10000, error_policy=ErrorPolicy.SKIP)
     async def collect(self, message: object = None, **kwargs: Any) -> dict[str, str]:
-        """只读取适配器结构化来源；命中后中止普通聊天处理。"""
+        """复制群聊正文后继续原流程，仅私聊确认会中止普通聊天处理。"""
         del kwargs
         if not cast(BridgePluginConfig, self.config).plugin.enabled or self.queue is None or not isinstance(message, Mapping):
             return {"action": "continue"}
@@ -123,26 +123,26 @@ class QQBotCollabBridge(MaiBotPlugin):
         if message.get("platform") != config.platform_id or str(extra.get("self_id", "")) != config.bot_id or sender == config.bot_id:
             return {"action": "continue"}
         segments = message.get("raw_message", [])
-        source_types = extra.get("napcat_segment_types", [])
-        if not isinstance(segments, list) or not isinstance(source_types, list) or not source_types or any(kind not in ("text", "at") for kind in source_types):
-            return {"action": "continue"}
-        if any(not isinstance(part, Mapping) or part.get("type") not in ("text", "at") for part in segments):
+        if not isinstance(segments, list) or any(not isinstance(part, Mapping) for part in segments):
             return {"action": "continue"}
         parts = cast(list[Mapping[str, Any]], segments)
         plain = "".join(str(part.get("data", "")) for part in parts if part.get("type") == "text").strip()
         mentioned = any(part.get("type") == "at" and isinstance(part.get("data"), Mapping) and str(part["data"].get("target_user_id")) == config.bot_id for part in parts)
-        demand = bool(group) and mentioned and (plain == "需求" or plain.startswith("需求 ") or plain.startswith("需求\n"))
+        collect = bool(group) and mentioned and bool(plain)
         private = not group and extra.get("napcat_message_type") == "private"
+        source_types = extra.get("napcat_segment_types", [])
         confirmation = private and plain.startswith("确认 ")
-        if not demand and not confirmation:
+        if confirmation and (not isinstance(source_types, list) or not source_types or any(kind not in ("text", "at") for kind in source_types) or any(part.get("type") not in ("text", "at") for part in parts)):
+            return {"action": "continue"}
+        if not collect and not confirmation:
             return {"action": "continue"}
         try:
             source = str(message.get("message_id", ""))
             if not source:
                 raise ValueError("缺少平台消息ID")
-            if demand:
+            if collect:
                 self.queue.expire()
-                self.queue.collect(group, source, sender, plain[2:].strip())
+                self.queue.collect(group, source, sender, plain)
             elif sender == "605738729":
                 match = re.fullmatch(r"确认 ([0-9a-f-]{36}) ([a-zA-Z0-9_-]{1,32})", plain)
                 if not match:
@@ -155,11 +155,9 @@ class QQBotCollabBridge(MaiBotPlugin):
                     await self.send(sender, "确认已排队，等待Pi核验；尚不表示执行完成。", True)
         except Exception as exc:
             self.ctx.logger.warning("桥接输入未确认接收：%s", type(exc).__name__)
-            try:
-                if demand:
-                    await self.send(group, "协作收件失败：内容过长、队列已满或存储不可用。", False)
-                elif sender == "605738729":
+            if confirmation and sender == "605738729":
+                try:
                     await self.send(sender, "协作确认未入队，请核对格式或存储状态。", True)
-            except Exception as notify_error:
-                self.ctx.logger.warning("桥接错误通知发送失败：%s", type(notify_error).__name__)
-        return {"action": "abort"}
+                except Exception as notify_error:
+                    self.ctx.logger.warning("桥接错误通知发送失败：%s", type(notify_error).__name__)
+        return {"action": "abort" if confirmation else "continue"}

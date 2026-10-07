@@ -52,9 +52,9 @@ class Queue:
         return count
 
     def collect(self, group: str, message: str, sender: str, body: str):
-        """收到明确需求后先持久化，容量不足明确拒收。"""
+        """持久化直接@机器人的正文文本，容量不足时抛错供调用者记日志。"""
         if not group.isdecimal() or not sender.isdecimal() or not message or len(message) > 128 or not body.strip() or len(body.encode()) > 8192:
-            raise ValueError("需求来源或长度无效")
+            raise ValueError("消息来源或长度无效")
         with self.db:
             if self.db.execute("SELECT 1 FROM items WHERE group_id=? AND message_id=?", (group, message)).fetchone():
                 return
@@ -92,7 +92,7 @@ class Queue:
         return True
 
     def summarize(self, identifier: str, summary: str):
-        """先落摘要再发送，使HTTP重试不产生第二次模型调用。"""
+        """先保存摘要或固定空标记，使重启和HTTP重试不重复调用模型。"""
         if not summary.strip() or len(summary.encode()) > 8192:
             raise ValueError("摘要为空或超限")
         with self.db:
@@ -103,6 +103,11 @@ class Queue:
         with self.db:
             self.db.execute("UPDATE batches SET state='delivered' WHERE id=?", (identifier,))
             self.db.execute("UPDATE items SET body=NULL WHERE batch_id=?", (identifier,))
+
+    def finish_empty(self, identifier: str):
+        """空结果只在本地标记已处理；原文仍按七天规则清理。"""
+        with self.db:
+            self.db.execute("UPDATE batches SET state='empty' WHERE id=? AND state='pending'", (identifier,))
 
     def sent(self, identifier: str, mark: bool = False) -> bool:
         """记录QQ已发送状态，避免ack丢失后再次发送。"""
