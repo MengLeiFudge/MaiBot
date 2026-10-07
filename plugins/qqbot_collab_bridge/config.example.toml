@@ -13,6 +13,6 @@ token = ""
 port = 19191
 model = "replyer"
 batch_size = 10
-batch_minutes = 30
+batch_minutes = 3
 daily_attempts = 24
 max_raw_bytes = 16777216

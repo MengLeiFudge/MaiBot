@@ -35,7 +35,7 @@ class BridgeSection(PluginConfigBase):
     port: int = Field(default=19191, ge=1024, le=65535, description="本机端口")
     model: str = Field(default="replyer", description="无工具文本生成任务名")
     batch_size: int = Field(default=10, ge=1, le=50, description="每群触发条数")
-    batch_minutes: int = Field(default=30, ge=1, le=1440, description="每群最大等待分钟")
+    batch_minutes: int = Field(default=3, ge=1, le=1440, description="每群最大等待分钟")
     daily_attempts: int = Field(default=24, ge=1, le=1000, description="UTC日模型尝试总数，失败也计数")
     max_raw_bytes: int = Field(default=16777216, ge=65536, le=268435456, description="原文容量字节数")
 
@@ -106,7 +106,7 @@ class QQBotCollabBridge(MaiBotPlugin):
 
     @HookHandler("chat.receive.before_process", name="qqbot_collab_bridge", description="旁路收集@消息与处理主人确认", mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=10000, error_policy=ErrorPolicy.SKIP)
     async def collect(self, message: object = None, **kwargs: Any) -> dict[str, str]:
-        """复制群聊正文后继续原流程，仅私聊确认会中止普通聊天处理。"""
+        """旁路复制群正文；主人汇总命令与私聊确认独立处理。"""
         del kwargs
         if not cast(BridgePluginConfig, self.config).plugin.enabled or self.queue is None or not isinstance(message, Mapping):
             return {"action": "continue"}
@@ -115,7 +115,7 @@ class QQBotCollabBridge(MaiBotPlugin):
             return {"action": "continue"}
         extra = info.get("additional_config", {})
         user = info.get("user_info", {})
-        group_info = info.get("group_info", {})
+        group_info = info.get("group_info") or {}
         if not isinstance(extra, Mapping) or not isinstance(user, Mapping) or not isinstance(group_info, Mapping):
             return {"action": "continue"}
         config = cast(BridgePluginConfig, self.config).bridge
@@ -131,12 +131,22 @@ class QQBotCollabBridge(MaiBotPlugin):
         collect = bool(group) and mentioned and bool(plain)
         private = not group and extra.get("napcat_message_type") == "private"
         source_types = extra.get("napcat_segment_types", [])
+        immediate = sender == "605738729" and plain == "汇总" and (private or bool(group) and mentioned)
         confirmation = private and plain.startswith("确认 ")
-        if confirmation and (not isinstance(source_types, list) or not source_types or any(kind not in ("text", "at") for kind in source_types) or any(part.get("type") not in ("text", "at") for part in parts)):
+        if (immediate or confirmation) and (not isinstance(source_types, list) or not source_types or any(kind not in ("text", "at") for kind in source_types) or any(part.get("type") not in ("text", "at") for part in parts)):
             return {"action": "continue"}
-        if not collect and not confirmation:
+        if not collect and not confirmation and not immediate:
             return {"action": "continue"}
         try:
+            if immediate:
+                status = self.queue.request_summary(None if private else group, config.daily_attempts)
+                if status == "queued":
+                    self.client.wake.set()
+                elif status == "empty" and private:
+                    await self.send(sender, "没有待汇总的消息", True)
+                elif status == "limited":
+                    await self.send(sender, "今日汇总次数已用完", True)
+                return {"action": "abort"}
             source = str(message.get("message_id", ""))
             if not source:
                 raise ValueError("缺少平台消息ID")
@@ -155,9 +165,9 @@ class QQBotCollabBridge(MaiBotPlugin):
                     await self.send(sender, "确认已排队，等待Pi核验；尚不表示执行完成。", True)
         except Exception as exc:
             self.ctx.logger.warning("桥接输入未确认接收：%s", type(exc).__name__)
-            if confirmation and sender == "605738729":
+            if (immediate or confirmation) and sender == "605738729":
                 try:
-                    await self.send(sender, "协作确认未入队，请核对格式或存储状态。", True)
+                    await self.send(sender, "协作请求未入队，请核对格式或存储状态。", True)
                 except Exception as notify_error:
                     self.ctx.logger.warning("桥接错误通知发送失败：%s", type(notify_error).__name__)
-        return {"action": "abort" if confirmation else "continue"}
+        return {"action": "abort" if confirmation or immediate else "continue"}

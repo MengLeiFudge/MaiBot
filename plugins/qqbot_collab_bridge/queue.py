@@ -27,6 +27,7 @@ class Queue:
                 CREATE TABLE IF NOT EXISTS budget (day TEXT PRIMARY KEY,attempts INTEGER);
                 CREATE TABLE IF NOT EXISTS sent (id TEXT PRIMARY KEY);
                 CREATE TABLE IF NOT EXISTS replies (id TEXT PRIMARY KEY,payload TEXT);
+                CREATE TABLE IF NOT EXISTS summary_requests (batch_id TEXT PRIMARY KEY);
             """)
             encoded = json.dumps(binding, sort_keys=True)
             with self.db:
@@ -49,6 +50,7 @@ class Queue:
             self.db.execute("UPDATE batches SET state='expired' WHERE state='pending' AND id IN (SELECT batch_id FROM items WHERE received_at<=?)", (cutoff,))
             count = self.db.execute("UPDATE items SET body=NULL WHERE received_at<=? AND body IS NOT NULL", (cutoff,)).rowcount
             self.db.execute("DELETE FROM items WHERE body IS NULL AND received_at<?", (cutoff - 604800000,))
+            self.db.execute("DELETE FROM summary_requests WHERE batch_id IN (SELECT id FROM batches WHERE state<>'pending')")
         return count
 
     def collect(self, group: str, message: str, sender: str, body: str):
@@ -63,18 +65,48 @@ class Queue:
                 raise ValueError("原文队列已满")
             self.db.execute("INSERT INTO items VALUES(?,?,?,?,?,NULL)", (group, message, sender, int(time.time() * 1000), body))
 
+    def _freeze(self, group: str) -> str:
+        """在调用者事务内冻结至多50条当前原文；后来的消息留给下一次触发。"""
+        identifier = str(uuid.uuid4())
+        self.db.execute("INSERT INTO batches(id,group_id) VALUES(?,?)", (identifier, group))
+        self.db.execute("UPDATE items SET batch_id=? WHERE group_id=? AND message_id IN (SELECT message_id FROM items WHERE group_id=? AND batch_id IS NULL AND body IS NOT NULL ORDER BY received_at,message_id LIMIT 50)", (identifier, group, group))
+        return identifier
+
+    def budget_available(self, limit: int) -> bool:
+        """只读取UTC日预算，真正调用模型前仍由charge计费。"""
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        row = self.db.execute("SELECT attempts FROM budget WHERE day=?", (day,)).fetchone()
+        return not row or row[0] < limit
+
+    def request_summary(self, group: str | None, limit: int) -> str:
+        """冻结主人指定群或所有群的当前积压，不绕过预算与失败退避。"""
+        self.expire()
+        with self.db:
+            groups = self.db.execute("SELECT group_id FROM items WHERE batch_id IS NULL AND body IS NOT NULL AND (? IS NULL OR group_id=?) UNION SELECT group_id FROM batches WHERE state='pending' AND (? IS NULL OR group_id=?)", (group, group, group, group)).fetchall()
+            if not groups:
+                return "empty"
+            if not self.budget_available(limit):
+                return "limited"
+            for row in groups:
+                while self.db.execute("SELECT 1 FROM items WHERE group_id=? AND batch_id IS NULL AND body IS NOT NULL LIMIT 1", (row[0],)).fetchone():
+                    self._freeze(row[0])
+                self.db.execute("INSERT OR IGNORE INTO summary_requests SELECT id FROM batches WHERE group_id=? AND state='pending'", (row[0],))
+        return "queued"
+
+    def requested_ready(self, limit: int) -> bool:
+        """只在退避结束且预算允许时连续处理立即汇总批次，防止空转。"""
+        return self.db.execute("SELECT 1 FROM batches b JOIN summary_requests r ON r.batch_id=b.id WHERE b.state='pending' AND (b.summary IS NOT NULL OR (b.attempted<=? AND ?)) LIMIT 1", (int(time.time() * 1000) - 1800000, self.budget_available(limit))).fetchone() is not None
+
     def next_batch(self, count: int, delay: int) -> dict | None:
         """优先重发已冻结批次；新批次始终只包含一个群。"""
         now = int(time.time() * 1000)
         with self.db:
-            row = self.db.execute("SELECT * FROM batches WHERE state='pending' AND (summary IS NOT NULL OR attempted<=?) ORDER BY attempted,id LIMIT 1", (now - 1800000,)).fetchone()
+            row = self.db.execute("SELECT * FROM batches WHERE state='pending' AND (summary IS NOT NULL OR attempted<=?) ORDER BY (summary IS NOT NULL) DESC,(id IN (SELECT batch_id FROM summary_requests)) DESC,attempted,id LIMIT 1", (now - 1800000,)).fetchone()
             if not row:
                 group = self.db.execute("SELECT group_id FROM items WHERE batch_id IS NULL AND body IS NOT NULL GROUP BY group_id HAVING count(*)>=? OR min(received_at)<=? ORDER BY min(received_at) LIMIT 1", (count, now - delay)).fetchone()
                 if not group:
                     return None
-                identifier = str(uuid.uuid4())
-                self.db.execute("INSERT INTO batches(id,group_id) VALUES(?,?)", (identifier, group[0]))
-                self.db.execute("UPDATE items SET batch_id=? WHERE group_id=? AND message_id IN (SELECT message_id FROM items WHERE group_id=? AND batch_id IS NULL AND body IS NOT NULL ORDER BY received_at,message_id LIMIT 50)", (identifier, group[0], group[0]))
+                identifier = self._freeze(group[0])
                 row = self.db.execute("SELECT * FROM batches WHERE id=?", (identifier,)).fetchone()
             batch = dict(row)
             batch["items"] = [dict(value) for value in self.db.execute("SELECT message_id,sender_id,received_at,body FROM items WHERE batch_id=? ORDER BY received_at,message_id", (batch["id"],))]

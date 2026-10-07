@@ -24,6 +24,7 @@ class BridgeClient:
         self.binding["protocol"] = 1
         self.last_error = ""
         self.delivery_ready = False
+        self.wake = asyncio.Event()
 
     def _http(self, method: str, path: str, payload: dict | None) -> dict:
         """标准库客户端不跟随重定向；每次请求单独关闭连接。"""
@@ -99,6 +100,8 @@ class BridgeClient:
                     self.logger.info("桥接恢复投递")
                 self.delivery_ready = True
                 self.last_error = ""
+                if self.queue.requested_ready(self.config.daily_attempts):
+                    self.wake.set()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -107,4 +110,8 @@ class BridgeClient:
                     self.logger.warning("桥接暂停投递：%s", error)
                 self.delivery_ready = False
                 self.last_error = error
-            await asyncio.sleep(15)
+            try:
+                await asyncio.wait_for(self.wake.wait(), timeout=15)
+            except asyncio.TimeoutError:
+                pass
+            self.wake.clear()
