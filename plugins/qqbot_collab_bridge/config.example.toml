@@ -1,0 +1,18 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[bridge]
+bridge_id = ""
+database_id = ""
+generation = ""
+task_id = ""
+platform_id = "qq"
+bot_id = "2629227874"
+token = ""
+port = 19191
+model = "replyer"
+batch_size = 10
+batch_minutes = 30
+daily_attempts = 24
+max_raw_bytes = 16777216
