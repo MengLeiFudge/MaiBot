@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-visual",
+  "version": "0.1.0",
+  "name": "QQBot 定向看图",
+  "description": "通过公开入站 Hook 屏蔽非定向媒体的自动识图，定向附件沿用原生图片处理。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [],
+  "capabilities": ["config.get", "message.get_by_id"],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}
