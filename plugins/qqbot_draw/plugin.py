@@ -15,6 +15,9 @@ from maibot_sdk import Command, CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, Ma
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 from qqbot_common.api_results import require_api_result
 
+from .draw_input import DOUDOUYAN_AVATAR_COMMAND, STANDARD_DRAW_PREFIX, doudouyan_command_parts, prepare_explicit_draw_request, preload_draw_references
+from .draw_output import save_generated_image
+from .draw_intent import DRAW_INTENT_SYSTEM, DrawIntent, DrawIntentRouter
 from .draw_logic import RightCodesDrawClient
 from .draw_logic import RightCodesDrawQuotaResult
 from .draw_logic import RightCodesDrawQuotaStore
@@ -39,10 +42,8 @@ from .draw_logic import looks_like_rightcodes_draw_invocation
 from .draw_logic import looks_like_rightcodes_draw_points_mutation_request
 from .draw_logic import looks_like_rightcodes_draw_points_query
 from .draw_logic import looks_like_rightcodes_draw_points_ranking
-from .draw_logic import looks_like_rightcodes_draw_suggestion
 from .draw_logic import parse_rightcodes_draw_command
 from .draw_logic import parse_rightcodes_draw_model_switch
-from .draw_logic import format_rightcodes_draw_suggestion_message
 from .process_lock import InterProcessLock
 from .rightcodes_catalog import extract_current_query
 from .rightcodes_catalog import inject_catalog_into_messages
@@ -58,7 +59,7 @@ from .rightcodes_rewrite import should_rewrite_draw_prompt
 
 DRAW_COMMAND_PATTERN = (
     r"^(?:@\S+\s*)?(?:"
-    r"(?:棉花糖|棉花)\s*生图[\s\S]*|"
+    r"(?:文生图|图生图|头像生图|(?:棉花糖|棉花)\s*生图|生成)[\s\S]*|"
     r"(?:查|查询|查看|看)?(?:一下)?(?:我(?:的)?|当前)?(?:生图)?积分(?:余额|情况|多少)?|"
     r"(?:balance|points?)|积分排行(?:榜)?|"
     r"(?:生图|画图|棉花糖生图|棉花生图)(?:模型说明|模型|价格)|"
@@ -104,19 +105,19 @@ class StorageSection(PluginConfigBase):
 
 
 class RightCodesSection(PluginConfigBase):
-    """RightCodes 上游配置。"""
+    """CPA 生图入口与积分价格配置；保留原配置节名。"""
 
-    __ui_label__ = "RightCodes"
+    __ui_label__ = "CPA 生图"
     __ui_order__ = 3
 
     api_key: str = Field(
         default="",
-        description="RightCodes API Key",
+        description="CPA 客户端 API Key",
         json_schema_extra={"x-widget": "password", "x-icon": "key", "label": "API Key", "order": 0},
     )
-    point_multiplier: int = Field(default=1000, ge=1, le=1_000_000, description="美元价格换算积分倍率")
+    base_url: str = Field(default="http://127.0.0.1:8317/v1", description="CPA API 地址，包含 /v1")
+    point_multiplier: int = Field(default=1000, ge=1, le=1_000_000, description="人民币价格换算积分倍率")
     draw_timeout_seconds: int = Field(default=240, ge=30, le=900, description="单次生图总超时秒数")
-    poll_interval_seconds: float = Field(default=2.0, ge=0.2, le=30.0, description="异步任务轮询间隔秒数")
 
 
 class PointsSection(PluginConfigBase):
@@ -147,6 +148,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
     async def on_load(self) -> None:
         """记录插件接管状态，不在日志中输出密钥。"""
 
+        self._draw_intent_router = DrawIntentRouter()
         self.ctx.logger.info(
             "QQBot 生图插件已加载，业务写入=%s",
             self.config.cutover.write_enabled,
@@ -212,67 +214,62 @@ class QQBotDrawPlugin(MaiBotPlugin):
         return True, response, True
 
     @HookHandler(
-        "chat.receive.before_process",
-        name="qqbot_draw_natural_request_hint",
-        description="自然语言生图请求只提示固定指令，不执行扣分或生图",
+        "chat.receive.after_process",
+        name="qqbot_draw_natural_intent",
+        description="把明确唤醒后的自然语言请求归一到文生图或图生图",
         mode=HookMode.BLOCKING,
         order=HookOrder.EARLY,
-        timeout_ms=10000,
+        timeout_ms=1020000,
         error_policy=ErrorPolicy.SKIP,
     )
-    async def handle_natural_draw_request(
-        self,
-        message: object = None,
-        **kwargs: Any,
-    ) -> dict[str, object]:
-        """在聊天链前确定性提示自然语言生图请求。"""
-
+    async def handle_draw_intent(self, message: object = None, **kwargs: Any) -> dict[str, str]:
+        """只对启用且有唯一归属的自然语言请求分类，普通聊天继续原链路。"""
         del kwargs
-        if not self.config.plugin.enabled or not self.config.cutover.write_enabled:
+        if not self.config.plugin.enabled or not self.config.cutover.write_enabled or not isinstance(message, Mapping):
+            return {"action": "continue"}
+        text = _text_segments(message)
+        if re.fullmatch(DRAW_COMMAND_PATTERN, text):
             return {"action": "continue"}
         group_id, user_id = _message_scope(message)
-        command_text = _text_segments(message)
-        facts = _message_facts(message, command_text, group_id, user_id)
-        if not command_text or user_id in self.config.points.bot_account_ids:
+        facts = _message_facts(message, text, group_id, user_id)
+        self_id = facts["self_id"]
+        stream_id = str(message.get("session_id") or "")
+        if not self_id or not user_id or not stream_id or user_id == self_id or user_id in self.config.points.bot_account_ids:
             return {"action": "continue"}
-        if group_id and not _is_direct_message(message):
-            return {"action": "continue"}
-        if not looks_like_rightcodes_draw_suggestion(command_text):
+        if group_id and not (message.get("is_at") or message.get("is_mentioned") or self_id in facts["at_target_ids"]):
             return {"action": "continue"}
 
-        if not facts["self_id"]:
-            response = "生图提示暂时无法确认当前机器人身份。"
-            await self._send_quoted_result(
-                group_id=group_id,
-                user_id=user_id,
-                message_id=_message_id(message),
-                text=response,
-                image_url="",
+        async def classify_intent(prompt: str) -> str:
+            """通过公开LLM接口选用当前replyer任务，不带聊天历史。"""
+            result = await self.ctx.llm.generate(
+                prompt=[{"role": "system", "content": DRAW_INTENT_SYSTEM}, {"role": "user", "content": prompt}],
+                model="replyer", temperature=0, max_tokens=1200,
             )
-            return {"action": "abort"}
+            if not isinstance(result, Mapping) or not result.get("success", True):
+                raise ValueError("意图模型调用失败")
+            self.ctx.logger.info("生图意图分类: task=replyer model=%s", result.get("model_name", "unknown"))
+            return str(result.get("response") or result.get("content") or "")
+
         try:
-            claimed = await self._claim(command_text, facts)
-        except Exception as exc:
-            self.ctx.logger.warning("自然语言生图提示仲裁失败: error_type=%s", type(exc).__name__)
-            response = "生图提示仲裁失败，请稍后重试。"
-            await self._send_quoted_result(
-                group_id=group_id,
-                user_id=user_id,
-                message_id=_message_id(message),
-                text=response,
-                image_url="",
+            intent = await self._draw_intent_router.resolve(
+                _message_parts(message), sender_id=user_id, self_id=self_id,
+                call_action=self._call_image_action, classify=classify_intent,
             )
+        except Exception as exc:
+            self.ctx.logger.warning("生图意图解析不可用: error_type=%s", type(exc).__name__)
+            return {"action": "continue"}
+        if intent is None or intent.action == "none":
+            return {"action": "continue"}
+        if intent.action == "clarify":
+            await self.ctx.send.text(f"{intent.clarification} 本次没有扣积分。", stream_id)
             return {"action": "abort"}
-        if not claimed:
-            return {"action": "abort"}
-
-        await self._send_quoted_result(
-            group_id=group_id,
-            user_id=user_id,
-            message_id=_message_id(message),
-            text=format_rightcodes_draw_suggestion_message(),
-            image_url="",
-        )
+        if not await self._claim(text, facts):
+            return {"action": "continue"}
+        prepared_message = dict(message)
+        prepared_message["raw_message"] = intent.command_parts()
+        runtime_root = await self._runtime_root()
+        await self._run_draw(RightCodesDrawRequest(prompt=intent.prompt), stream_id, group_id, user_id,
+                             prepared_message, runtime_root, intent=intent)
         return {"action": "abort"}
 
     @HookHandler(
@@ -344,7 +341,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
         message: object,
         runtime_root: Path,
     ) -> str:
-        if looks_like_rightcodes_draw_points_mutation_request(command_text):
+        if not STANDARD_DRAW_PREFIX.match(command_text) and looks_like_rightcodes_draw_points_mutation_request(command_text):
             response = format_rightcodes_draw_points_mutation_denied()
             await self.ctx.send.text(response, stream_id)
             return response
@@ -399,6 +396,12 @@ class QQBotDrawPlugin(MaiBotPlugin):
             response = format_rightcodes_draw_missing_prompt_message()
             await self.ctx.send.text(response, stream_id)
             return response
+        if (STANDARD_DRAW_PREFIX.match(command_text) and not STANDARD_DRAW_PREFIX.match(_text_segments(message))) or (
+            command_text == DOUDOUYAN_AVATAR_COMMAND and _text_segments(message) != DOUDOUYAN_AVATAR_COMMAND
+        ):
+            response = "无法读取这条生图指令的原始消息组件，本次没有扣积分，请重新发送。"
+            await self.ctx.send.text(response, stream_id)
+            return response
         return await self._run_draw(request, stream_id, group_id, user_id, message, runtime_root)
 
     async def _run_draw(
@@ -409,12 +412,30 @@ class QQBotDrawPlugin(MaiBotPlugin):
         user_id: str,
         message: object,
         runtime_root: Path,
+        *,
+        intent: DrawIntent | None = None,
     ) -> str:
         balance = await asyncio.to_thread(self._get_balance_locked, runtime_root, user_id)
-        prepared_request, preparation_error = await self._prepare_draw_request(
-            request=RightCodesDrawRequest(prompt=request.prompt, model=balance.model),
-            message=message,
-        )
+        preparation_error = ""
+        try:
+            parts = _message_parts(message)
+            preset_parts = await doudouyan_command_parts(parts, call_action=self._call_image_action)
+            if STANDARD_DRAW_PREFIX.match(_text_segments(message)) or preset_parts is not None:
+                prepared_request = await prepare_explicit_draw_request(
+                    preset_parts if preset_parts is not None else parts,
+                    sender_id=user_id, model=balance.model, call_action=self._call_image_action,
+                )
+            else:
+                prepared_request, preparation_error = await self._prepare_draw_request(
+                    request=RightCodesDrawRequest(prompt=request.prompt, model=balance.model),
+                    message=message,
+                )
+                if not preparation_error:
+                    prepared_request = await preload_draw_references(prepared_request)
+        except Exception as exc:
+            self.ctx.logger.warning("生图输入准备失败: error_type=%s", type(exc).__name__)
+            detail = str(exc) if isinstance(exc, ValueError) else "原图读取失败或超时，请重新附图或引用"
+            preparation_error = f"{detail}。本次没有扣积分。"
         if preparation_error:
             await self._send_quoted_result(
                 group_id=group_id,
@@ -432,22 +453,31 @@ class QQBotDrawPlugin(MaiBotPlugin):
             return response
 
         try:
-            await self.ctx.send.text(format_draw_start_message(quota), stream_id)
+            async with asyncio.timeout(30):
+                start_message = format_draw_start_message(quota)
+                start_message += ("\n提示词来源：豆豆眼预设（完整固定原文）" if preset_parts is not None
+                                  else "\n提示词来源：用户话语（无预设）")
+                if preset_parts is not None:
+                    start_message += "\n本次按固定原文生成，不追加其他描述。"
+                    if intent is not None and intent.source is not None:
+                        start_message += f"\n本次来源：{intent.source.label}"
+                    elif _text_segments({"raw_message": preset_parts}).startswith("头像生图"):
+                        start_message += "\n本次来源：头像生图指定的头像"
+                    else:
+                        target = "当前附图" if any(part.get("type") == "image" for part in preset_parts) else "引用图片"
+                        start_message += f"\n本次来源：{target}"
+                elif intent is not None:
+                    start_message += intent.start_detail()
+                await self.ctx.send.text(start_message, stream_id)
             client = RightCodesDrawClient(
                 api_key=self.config.rightcodes.api_key,
+                base_url=self.config.rightcodes.base_url,
                 timeout_seconds=float(self.config.rightcodes.draw_timeout_seconds),
-                poll_interval_seconds=self.config.rightcodes.poll_interval_seconds,
             )
             result = await client.draw(prepared_request)
-            response = format_rightcodes_draw_success(result, model=quota.model)
-            await self._send_quoted_result(
-                group_id=group_id,
-                user_id=user_id,
-                message_id=_message_id(message),
-                text=response,
-                image_url=result.image_url,
-            )
-            return response
+        except asyncio.CancelledError:
+            await asyncio.shield(asyncio.to_thread(self._refund_locked, runtime_root, quota))
+            raise
         except Exception as exc:
             await asyncio.to_thread(self._refund_locked, runtime_root, quota)
             if isinstance(exc, RightCodesDrawTimeoutError):
@@ -462,6 +492,55 @@ class QQBotDrawPlugin(MaiBotPlugin):
                 image_url="",
             )
             return response
+
+        saved = None
+        try:
+            saved = await asyncio.to_thread(save_generated_image, result.image_bytes, runtime_root)
+        except Exception as exc:
+            self.ctx.logger.error("生图结果保存失败: error_type=%s", type(exc).__name__)
+        response = format_rightcodes_draw_success(result, model=quota.model)
+        if saved is not None:
+            source = saved.resolve().as_uri()
+        else:
+            response += "\n图片未保存到本地，已尝试直接交付，请及时保存。"
+            source = f"base64://{base64.b64encode(result.image_bytes).decode('ascii')}"
+        try:
+            await self._send_quoted_result(
+                group_id=group_id, user_id=user_id, message_id=_message_id(message),
+                text=response, image_url=source,
+            )
+            return response
+        except Exception as exc:
+            self.ctx.logger.warning("生图发送失败: error_type=%s saved=%s", type(exc).__name__, saved)
+        if saved is None:
+            try:
+                await asyncio.shield(asyncio.to_thread(self._refund_locked, runtime_root, quota))
+                response = "图片已生成，但保存和发送均失败，本次积分已退回。"
+            except Exception as exc:
+                self.ctx.logger.error("生图积分退款失败: error_type=%s", type(exc).__name__)
+                response = "图片已生成，但保存和发送均失败；积分退款失败，请联系管理员处理。"
+        else:
+            response = f"图片已生成并保存，但发送失败。请联系管理员取回：{saved.name}。本次未退积分。"
+        try:
+            await self._send_quoted_result(
+                group_id=group_id, user_id=user_id, message_id="", text=response, image_url="",
+            )
+        except Exception as exc:
+            self.ctx.logger.warning("生图失败提示发送失败: error_type=%s", type(exc).__name__)
+        return response
+
+    async def _call_image_action(self, action: str, **params: object) -> object:
+        """通过 NapCat 公开插件 API 读取图片来源，并解开 OneBot 响应。"""
+        if action == "get_msg":
+            result = await self.ctx.api.call("adapter.napcat.message.get_msg", **params)
+        elif action == "get_image":
+            result = await self.ctx.api.call("adapter.napcat.file.get_image", params=params)
+        else:
+            raise ValueError("不支持的图片读取动作")
+        payload = require_api_result(result, "读取图片来源")
+        if isinstance(payload, Mapping) and ("status" in payload or "retcode" in payload):
+            return payload.get("data")
+        return payload
 
     async def _prepare_draw_request(
         self,
@@ -584,6 +663,8 @@ class QQBotDrawPlugin(MaiBotPlugin):
             segments.append({"type": "reply", "data": {"id": message_id}})
         segments.append({"type": "text", "data": {"text": text}})
         if image_url:
+            if image_url.startswith("data:image/"):
+                image_url = f"base64://{image_url.partition(',')[2]}"
             segments.append(
                 {
                     "type": "image",
@@ -596,7 +677,8 @@ class QQBotDrawPlugin(MaiBotPlugin):
         else:
             api_name = "adapter.napcat.message.send_private_msg"
             params = {"user_id": user_id, "message": segments}
-        result = await self.ctx.api.call(api_name, params=params)
+        async with asyncio.timeout(60):
+            result = await self.ctx.api.call(api_name, params=params)
         require_api_result(result, "发送生图结果")
 
     async def _claim(self, text: str, facts: dict[str, Any]) -> bool:
@@ -820,12 +902,6 @@ def _is_only_media_placeholder(text: str) -> bool:
     for placeholder in _MEDIA_PLACEHOLDERS:
         normalized = normalized.replace(placeholder, "")
     return not normalized.strip()
-
-
-def _is_direct_message(message: object) -> bool:
-    if not isinstance(message, Mapping):
-        return False
-    return bool(message.get("is_mentioned") or message.get("is_at"))
 
 
 async def _normalize_reference_image(source: str) -> str:

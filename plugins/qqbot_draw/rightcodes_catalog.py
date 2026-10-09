@@ -5,63 +5,53 @@ import re
 
 CATALOG_MARKER = "【RightCodes 生图接口知识】"
 RIGHTCODES_DRAW_CATALOG_TEXT = """【RightCodes 生图接口知识】
-资料来源：Right Code 官方文档 https://docs.right.codes/docs/rc_draw/ ，最近核对 2026-08-03。
 
-基础信息：
-- 绘图基础地址：https://www.rightapi.ai/draw
-- 任务查询地址：https://www.rightapi.ai/v1/tasks/{task_id}，查询接口不带 /draw。
-- 鉴权头：Authorization: Bearer sk-xxxxx
-- 绘图请求使用异步流程：提交时带 async=true，取得 task_id 后轮询任务查询接口。
+当前 bot 生图功能：
+- 唯一可用模型为 gpt-image-2.5，每张 40 积分，对应人民币 0.04 元。
+- 标准指令：文生图 提示词；图生图 提示词（同条附图或引用图片）；头像生图 [@某人] 提示词。无头像目标时使用发送者头像，真实艾特须紧跟头像生图。生图模型 / 生图价格；查看积分；积分排行。
+- 以“生成”开头即直接调用生图，例如“生成一只白猫的图片”或“生成一只白猫”；允许不带空格、多行提示词，不要求图片后缀，群聊无需 @，按同一价格扣积分。只有“生成”而无提示词时不扣积分，提示补充内容。
+- 旧用户保存的模型自动归一为 gpt-image-2.5，积分余额不变。
+- 群消息继续累计积分；从第一张开始扣费，失败或超时原额退款。
+- 普通标准指令原样提交提示词，不调用聊天模型改写。图生图使用单张原图，当前附件优先于引用图片；原图获取失败不扣积分。普通旧生成/棉花糖生图变体保留条件改写与最多3张参考图。
+- 生成豆豆眼头像：固定将发送者本人的头像转为豆豆眼，直接使用完整固定预设。原有生图入口及自然语言改图请求含“豆豆眼”并指定头像或图片时，也完全换用该预设，不改写、不拼接。自然语言仍须识别为实际绘图意图，来源不明确先询问。
+- 所有开工通知都会明确提示词来源：用户话语（无预设），或豆豆眼预设（完整固定原文）。
+- 私聊或明确唤醒后的自然语言请求（如“画只猫”“帮我把我的头像改成水彩”）会先解析为文生图/图生图；完整请求直接开工并回显提示词和来源，歧义先询问，不扣积分。
+- 普通聊天回复只能介绍用法或引导明确指令，不得声称已开始绘图、已扣分或已交付；实际执行由生图插件负责。
+- 成品统一先保存再发送；保存失败仍尝试交付，并提示未保存。保存和交付均失败时退积分，不重复生成。
 
-/v1/images/generations：
-- POST https://www.rightapi.ai/draw/v1/images/generations
-- model、prompt、async=true 必填；n、size、imageSize、image 可选。
-- size 支持 1:1、16:9、9:16、4:3，或 1024x1024 这类像素串。
-- imageSize 支持 1K、2K、4K。
-- image 参考图应使用 data URL 数组。
-- 示例 body：
+仅在用户询问接口时说明以下技术信息：
+- bot 使用本机 CPA 的 OpenAI Images 接口，API 根地址为 http://127.0.0.1:8317/v1。
+- 鉴权使用 CPA 客户端 API Key；HC/RC 渠道选择与优先级由 CPA 配置管理，各渠道的 gpt-image-2.5 模型记录需要 image: true 才能使用 Images 接口。
+- 文生图：POST /images/generations，JSON body 示例：
 {
-  "model": "gpt-image-2",
+  "model": "gpt-image-2.5",
   "prompt": "一只白猫",
   "n": 1,
-  "size": "1:1",
-  "imageSize": "1K",
-  "async": true
+  "size": "1024x1024",
+  "response_format": "b64_json",
+  "output_format": "png"
 }
+- 参考图：POST /images/edits，multipart/form-data 单张使用 image 文件字段，多张使用 image[] 文件字段，其余文本参数与文生图相同。
+- 同一次 CPA 请求等待最终图片。RC 官方绘图接口另使用 /draw/v1/images/generations、JSON image 数组、async=true 和任务轮询；不能将该协议与当前 CPA Images 接口混用。
+- 从返回 data[].b64_json 或 data[].url 取得图片；默认尺寸为 1024x1024，不承诺其它尺寸。
 
-/v1beta/models/{model}:generateContent：
-- POST https://www.rightapi.ai/draw/v1beta/models/{model}:generateContent
-- 请求体带 async=true，提示词放在 contents[].parts[].text。
-- 比例和分辨率分别放在 generationConfig.imageConfig.aspectRatio 与 imageSize。
-- 参考图使用 contents[].parts[].inline_data，包含 mime_type 和 base64 data。
-
-/v1/tasks/{task_id}：
-- GET https://www.rightapi.ai/v1/tasks/{task_id}
-- queued / in_progress 继续轮询，completed 从 data 或 candidates 取图，failed 查看 error.message。
-- Images 完成响应也可能直接返回 created 和 data，不带 status，此时直接从 data 取图。
-
-已验证模型：
-- gpt-image-2：$0.04/次，支持 1K。
-- gpt-image-2-vip：$0.13/次，支持 1K。
-- nano-banana-2-lite：$0.05/次，支持 1K。
-- nano-banana-pro：$0.18/次，支持 1K、2K、4K。
-
-回答约束：说明异步提交与任务轮询，不推荐旧域名或同步等待方式。JSON 可以保留缩进，但不要使用 Markdown 代码围栏。用户问 body 时直接给可复制 JSON。"""
+回答约束：模型、价格和用法问题只回答当前 bot 的功能，说明价格时使用人民币“元”。接口 body 问题直接给可复制 JSON，保留缩进，不使用 Markdown 代码围栏。"""
 
 _KEYWORDS = (
     "rightcodes",
     "right code",
     "right.codes",
     "docs.right.codes",
-    "gpt-image-2",
-    "gpt-image-2-vip",
+    "gpt-image",
     "nano-banana",
     "nano banana",
     "画图接口",
+    "画", "生图", "绘图", "头像", "改图",
     "生图接口",
     "图片生成",
     "图像生成",
     "images/generations",
+    "images/edits",
     "generatecontent",
     "v1/tasks",
     "1024x1024",

@@ -1,48 +1,39 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING
 import hashlib
 import json
-import logging
+from io import BytesIO
 from pathlib import Path
 import re
 import threading
 import time
-from typing import Any, Protocol
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.parse import unquote, urlsplit
 
+import httpx
+from PIL import Image
+
+from .draw_output import load_generated_image
 from .storage import RuntimeJsonStore
 from .storage import read_json_file
 
 
-logger = logging.getLogger(__name__)
-RIGHTCODES_DRAW_BASE_URL = "https://www.rightapi.ai/draw"
-RIGHTCODES_DRAW_TASK_BASE_URL = "https://www.rightapi.ai"
-RIGHTCODES_DRAW_USER_AGENT = "QQBot-RightCodes/1.0"
-RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2"
+RIGHTCODES_DRAW_BASE_URL = "http://127.0.0.1:8317/v1"
+RIGHTCODES_DRAW_USER_AGENT = "QQBot-CPA-Draw/1.0"
+RIGHTCODES_DRAW_DEFAULT_MODEL = "gpt-image-2.5"
 RIGHTCODES_DRAW_POINT_PRICE_MULTIPLIER = 1000
-RIGHTCODES_DRAW_MODEL_ORDER = (
-    "gpt-image-2",
-    "gpt-image-2-vip",
-    "nano-banana-2-lite",
-    "nano-banana-pro",
-)
+RIGHTCODES_DRAW_MODEL_ORDER = (RIGHTCODES_DRAW_DEFAULT_MODEL,)
 RIGHTCODES_DRAW_MODELS = set(RIGHTCODES_DRAW_MODEL_ORDER)
 RIGHTCODES_DRAW_MODEL_PRICES = {
-    "gpt-image-2": Decimal("0.04"),
-    "gpt-image-2-vip": Decimal("0.13"),
-    "nano-banana-2-lite": Decimal("0.05"),
-    "nano-banana-pro": Decimal("0.18"),
+    RIGHTCODES_DRAW_DEFAULT_MODEL: Decimal("0.04"),
 }
 RIGHTCODES_DRAW_MODEL_DESCRIPTIONS = {
-    "gpt-image-2": "OpenAI 画图模型，上游支持 1K",
-    "gpt-image-2-vip": "OpenAI 官方直连，上游当前支持 1K，官方已停止 2K、4K",
-    "nano-banana-2-lite": "即 gemini-3.1-flash-lite-image，上游支持 1K",
-    "nano-banana-pro": "即 gemini-3-pro-image-preview，上游支持 1K、2K、4K",
+    RIGHTCODES_DRAW_DEFAULT_MODEL: "支持文字生图和参考图生图",
 }
 _DRAW_POINTS_LOCK = threading.Lock()
 _DRAW_POINTS_QUERY_RE = re.compile(
@@ -66,8 +57,11 @@ class RightCodesDrawRequest:
 
 @dataclass(frozen=True, slots=True)
 class RightCodesDrawResult:
+    """CPA 原始图片来源、耗时及供保存和发送复用的已校验 PNG 字节。"""
+
     image_url: str
     total_seconds: float
+    image_bytes: bytes = b""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,157 +87,136 @@ class RightCodesDrawQuotaResult:
 class RightCodesDrawTimeoutError(TimeoutError):
     def __init__(self, timeout_seconds: float) -> None:
         self.timeout_seconds = timeout_seconds
-        super().__init__(f"RightCodes 生图超过 {timeout_seconds:.0f} 秒未返回")
-
-
-class AsyncDrawHttpClient(Protocol):
-    async def post_json(
-        self,
-        url: str,
-        *,
-        headers: dict[str, str],
-        json: dict[str, object],
-        timeout: float,
-    ) -> Any:
-        ...
-
-    async def get_json(
-        self,
-        url: str,
-        *,
-        headers: dict[str, str],
-        timeout: float,
-    ) -> Any:
-        ...
+        super().__init__(f"生图超过 {timeout_seconds:.0f} 秒未返回")
 
 
 class RightCodesDrawClient:
+    """向 CPA 提交图片请求，渠道选择和上游重试均由 CPA 负责。"""
+
     def __init__(
         self,
         *,
         api_key: str,
         base_url: str = RIGHTCODES_DRAW_BASE_URL,
-        task_base_url: str = RIGHTCODES_DRAW_TASK_BASE_URL,
-        timeout_seconds: float = 180.0,
-        poll_interval_seconds: float = 2.0,
-        http_client: AsyncDrawHttpClient | None = None,
+        timeout_seconds: float = 240.0,
     ) -> None:
+        """保存 CPA 客户端凭据、包含 /v1 的地址和含参考图下载的总超时秒数。"""
         self.api_key = api_key.strip()
         self.base_url = base_url.rstrip("/")
-        self.task_base_url = task_base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
-        self.poll_interval_seconds = max(0.0, poll_interval_seconds)
-        self.http_client = http_client
 
     async def draw(self, request: RightCodesDrawRequest) -> RightCodesDrawResult:
+        """生成一张图片；参考图通过 Images edits 上传，返回图片来源和总耗时。"""
         if not self.api_key:
-            raise ValueError("缺少 RightCodes 生图 API Key")
+            raise ValueError("缺少 CPA 生图 API Key")
+        if request.model not in RIGHTCODES_DRAW_MODELS:
+            raise ValueError(f"不支持的生图模型: {request.model}")
         started = time.perf_counter()
-        deadline = started + self.timeout_seconds
         headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": RIGHTCODES_DRAW_USER_AGENT,
         }
-        data = await self._post_json(
-            f"{self.base_url}/v1/images/generations",
-            headers=headers,
-            json={
-                "model": request.model,
-                "prompt": request.prompt,
-                "image": list(request.image_urls),
-                "n": 1,
-                "size": "1:1",
-                "imageSize": "1K",
-                "async": True,
-            },
-            timeout=self.timeout_seconds,
+        payload = {
+            "model": request.model,
+            "prompt": request.prompt,
+            "n": 1,
+            "size": "1024x1024",
+            "response_format": "b64_json",
+            "output_format": "png",
+        }
+        try:
+            async with asyncio.timeout(self.timeout_seconds):
+                async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False) as client:
+                    if request.image_urls:
+                        # 单张沿用单文件字段，多张参考图才使用数组字段。
+                        field = "image" if len(request.image_urls) == 1 else "image[]"
+                        files = []
+                        for index, source in enumerate(request.image_urls):
+                            image, mime = await load_draw_reference_image(source, client)
+                            files.append((field, (f"reference-{index}.{mime.split('/')[-1]}", image, mime)))
+                        response = await client.post(
+                            f"{self.base_url}/images/edits",
+                            headers=headers,
+                            data={key: str(value) for key, value in payload.items()},
+                            files=files,
+                        )
+                    else:
+                        response = await client.post(
+                            f"{self.base_url}/images/generations",
+                            headers=headers,
+                            json=payload,
+                        )
+                    response.raise_for_status()
+                    data = response.json()
+                    image_url = extract_image_url_from_object(data)
+                    if not image_url:
+                        raise RuntimeError(extract_rightcodes_task_error(data) or "生图服务没有返回图片")
+                    image_bytes = await load_generated_image(image_url, client)
+        except (TimeoutError, httpx.TimeoutException) as exc:
+            raise RightCodesDrawTimeoutError(self.timeout_seconds) from exc
+        except httpx.HTTPStatusError as exc:
+            try:
+                detail = extract_rightcodes_task_error(exc.response.json())
+            except (ValueError, httpx.ResponseNotRead):
+                detail = ""
+            detail = re.sub(r"\s+", " ", detail).replace(self.api_key, "[redacted]")
+            detail = re.sub(r"\b(?:sk-|Bearer\s+)[A-Za-z0-9._-]+", "[redacted]", detail, flags=re.IGNORECASE)[:300]
+            if "is not supported on /v1/images/" in detail:
+                detail = f"CPA 尚未将 {request.model} 注册为图片模型，请检查渠道模型的 image 配置"
+            message = f"生图服务返回 HTTP {exc.response.status_code}"
+            if detail:
+                message += f"：{detail}"
+            raise RuntimeError(message) from exc
+        return RightCodesDrawResult(
+            image_url=image_url, image_bytes=image_bytes, total_seconds=time.perf_counter() - started,
         )
-        image_url = extract_image_url_from_object(data)
-        if image_url:
-            return RightCodesDrawResult(image_url=image_url, total_seconds=time.perf_counter() - started)
-        task_id = extract_rightcodes_draw_task_id(data)
-        if not task_id:
-            raise RuntimeError(extract_rightcodes_task_error(data) or "RightCodes 生图没有返回任务 ID")
-        last_status = extract_rightcodes_task_status(data) or "submitted"
-        progress = extract_rightcodes_task_progress(data)
-        last_logged_at = started
-        logger.info(
-            "[QQBotFeatures] RightCodes draw task submitted: model=%s task_id=%s status=%s progress=%s",
-            request.model,
-            task_id,
-            last_status,
-            progress,
-        )
 
-        while True:
-            remaining = deadline - time.perf_counter()
-            if remaining <= 0:
-                raise RightCodesDrawTimeoutError(self.timeout_seconds)
-            await asyncio.sleep(min(self.poll_interval_seconds, remaining))
-            remaining = deadline - time.perf_counter()
-            if remaining <= 0:
-                raise RightCodesDrawTimeoutError(self.timeout_seconds)
-            data = await self._get_json(
-                f"{self.task_base_url}/v1/tasks/{task_id}",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Accept": "application/json",
-                    "User-Agent": RIGHTCODES_DRAW_USER_AGENT,
-                },
-                timeout=remaining,
-            )
-            image_url = extract_image_url_from_object(data)
-            if image_url:
-                logger.info(
-                    "[QQBotFeatures] RightCodes draw task completed: model=%s task_id=%s elapsed=%.2fs",
-                    request.model,
-                    task_id,
-                    time.perf_counter() - started,
-                )
-                return RightCodesDrawResult(image_url=image_url, total_seconds=time.perf_counter() - started)
-            status = extract_rightcodes_task_status(data)
-            progress = extract_rightcodes_task_progress(data)
-            now = time.perf_counter()
-            if status != last_status or now - last_logged_at >= 30.0:
-                logger.info(
-                    "[QQBotFeatures] RightCodes draw task pending: model=%s task_id=%s status=%s progress=%s elapsed=%.2fs",
-                    request.model,
-                    task_id,
-                    status or "unknown",
-                    progress,
-                    now - started,
-                )
-                last_status = status
-                last_logged_at = now
-            if status == "failed":
-                raise RuntimeError(extract_rightcodes_task_error(data) or "RightCodes 生图任务失败")
-            if status == "completed":
-                raise RuntimeError("RightCodes 生图任务完成但没有返回图片")
 
-    async def _post_json(
-        self,
-        url: str,
-        *,
-        headers: dict[str, str],
-        json: dict[str, object],
-        timeout: float,
-    ) -> object:
-        if self.http_client is not None:
-            return await self.http_client.post_json(url, headers=headers, json=json, timeout=timeout)
-        return await post_json(url, headers, json, timeout)
-
-    async def _get_json(
-        self,
-        url: str,
-        *,
-        headers: dict[str, str],
-        timeout: float,
-    ) -> object:
-        if self.http_client is not None:
-            return await self.http_client.get_json(url, headers=headers, timeout=timeout)
-        return await get_json(url, headers, timeout)
+async def load_draw_reference_image(source: str, client: httpx.AsyncClient) -> tuple[bytes, str]:
+    """加载最多 20 MiB 的参考图并识别 MIME；远程下载不携带 CPA 凭据。"""
+    limit = 20 * 1024 * 1024
+    if source.startswith(("data:image/", "base64://")):
+        if source.startswith("data:image/"):
+            header, separator, encoded = source.partition(",")
+            if not separator or ";base64" not in header.lower():
+                raise ValueError("参考图必须是 Base64 data URL")
+        else:
+            encoded = source.removeprefix("base64://")
+        encoded = re.sub(r"\s+", "", encoded)
+        if len(encoded) > (limit + 2) // 3 * 4:
+            raise ValueError("参考图不能超过 20 MiB")
+        image = base64.b64decode(encoded, validate=True)
+    elif source.startswith(("http://", "https://")):
+        content = bytearray()
+        async with client.stream("GET", source, follow_redirects=True) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > limit:
+                    raise ValueError("参考图不能超过 20 MiB")
+        image = bytes(content)
+    else:
+        path = source
+        if source.startswith("file://"):
+            path = unquote(urlsplit(source).path)
+            if re.match(r"^/[A-Za-z]:", path):
+                path = path[1:]
+        with Path(path).open("rb") as stream:
+            image = stream.read(limit + 1)
+    if not image or len(image) > limit:
+        raise ValueError("参考图不能为空或超过 20 MiB")
+    with Image.open(BytesIO(image)) as reference:
+        mime = Image.MIME.get(reference.format or "", "")
+        if mime not in {"image/png", "image/jpeg", "image/webp"}:
+            converted = BytesIO()
+            reference.convert("RGBA").save(converted, format="PNG")
+            image, mime = converted.getvalue(), "image/png"
+        else:
+            reference.verify()
+    if len(image) > limit:
+        raise ValueError("参考图转换后不能超过 20 MiB")
+    return image, mime
 
 
 class RightCodesDrawQuotaStore:
@@ -420,16 +393,10 @@ def looks_like_rightcodes_draw_invocation(text: str) -> bool:
     return extract_rightcodes_draw_prompt(text.strip()) is not None
 
 
-def looks_like_rightcodes_draw_suggestion(text: str) -> bool:
-    return extract_natural_draw_prompt(text.strip()) is not None
-
-
-def looks_like_rightcodes_draw_feature_request(text: str, *, is_direct_or_private: bool = False) -> bool:
+def looks_like_rightcodes_draw_feature_request(text: str) -> bool:
     normalized = str(text or "").strip()
     if not normalized:
         return False
-    if looks_like_rightcodes_draw_suggestion(normalized):
-        return is_direct_or_private
     return (
         looks_like_rightcodes_draw_invocation(normalized)
         or looks_like_rightcodes_draw_points_mutation_request(normalized)
@@ -441,33 +408,26 @@ def looks_like_rightcodes_draw_feature_request(text: str, *, is_direct_or_privat
 
 
 def extract_rightcodes_draw_prompt(text: str) -> str | None:
-    command_match = re.match(r"^(?:棉花糖|棉花)\s*生图([\s\S]*)$", text)
+    """提取生图前缀之后的完整提示词，不要求图片后缀；仅有前缀时返回空字符串。"""
+    command_match = re.match(r"^(?:文生图|图生图|头像生图|(?:棉花糖|棉花)\s*生图|生成)([\s\S]*)$", text)
     if command_match is not None:
         return command_match.group(1).strip()
     return None
 
 
 def extract_removed_rightcodes_draw_temporary_model(text: str) -> str | None:
+    if text.lstrip().startswith(("文生图", "图生图", "头像生图")):
+        return None
     rest = extract_rightcodes_draw_prompt(text.strip())
     if not rest:
         return None
     bracket_match = re.match(r"^\[([^\]]+)\](?:\s+|$)", rest)
     if bracket_match is not None:
         candidate = bracket_match.group(1).strip().lower()
-        return candidate if candidate in RIGHTCODES_DRAW_MODELS else None
-    candidate = rest.split(maxsplit=1)[0].strip().lower()
-    return candidate if candidate in RIGHTCODES_DRAW_MODELS else None
-
-
-def extract_natural_draw_prompt(text: str) -> str | None:
-    natural_match = re.match(r"^生成\s*(.+?)(?:的)?(?:图片|图像|图)\s*$", text)
-    if natural_match is not None:
-        return natural_match.group(1).strip()
-    return None
-
-
-def format_rightcodes_draw_suggestion_message() -> str:
-    return "你是不是想用生图功能？指令是：棉花糖生图 提示词。这个功能会消耗生图积分。"
+    else:
+        candidate = rest.split(maxsplit=1)[0].strip().lower()
+    # 继续识别已退役的临时模型写法，避免将其当作提示词扣费执行。
+    return candidate if re.fullmatch(r"gpt-image-2(?:\.5|-vip)?|nano-banana(?:-2(?:-lite)?|-pro)?", candidate) else None
 
 
 def looks_like_rightcodes_draw_command(text: str) -> bool:
@@ -475,13 +435,13 @@ def looks_like_rightcodes_draw_command(text: str) -> bool:
 
 
 def format_rightcodes_draw_missing_prompt_message() -> str:
-    return "生图需要文字提示词。用法：棉花糖生图 提示词。需要换模型时，先发送：切换生图模型 模型名。"
+    return "请填写提示词。用法：文生图 提示词；图生图 提示词（附图或引用图）；头像生图 [@某人] 提示词。"
 
 
 def format_rightcodes_draw_temporary_model_removed(model: str) -> str:
     return (
         f"生图命令不再支持临时指定模型 {model}，本次没有扣积分。"
-        f"请先发送“切换生图模型 {model}”，再发送“棉花糖生图 提示词”。"
+        f"当前仅支持 {RIGHTCODES_DRAW_DEFAULT_MODEL}，请直接发送“文生图 提示词”。"
     )
 
 
@@ -560,15 +520,13 @@ def format_rightcodes_draw_model_help(
         price = format_rightcodes_draw_model_price(model)
         current_mark = "（当前）" if model == current_model else ""
         lines.append(
-            f"· {model}{current_mark}：${price}/次，"
+            f"· {model}{current_mark}：{price} 元/次，"
             f"{calculate_rightcodes_draw_model_points(model, multiplier=multiplier)} 积分。{description}"
         )
     lines.extend(
         [
             "",
-            "切换模型：切换生图模型 模型名",
-            "隐藏别名：生图模型 模型名",
-            "切换后生图：棉花糖生图 提示词",
+            "生图指令：文生图 提示词；图生图 提示词（附图或引用）；头像生图 [@某人] 提示词",
         ]
     )
     return "\n".join(lines)
@@ -582,8 +540,7 @@ def format_rightcodes_draw_points_status(balance: RightCodesDrawPointBalance) ->
             f"当前生图模型：{balance.model}",
             f"当前模型消耗：{cost_points} 积分/次",
             "",
-            "查看模型：生图模型",
-            "切换模型：切换生图模型 模型名",
+            "查看模型与价格：生图模型",
         ]
     )
 
@@ -611,19 +568,19 @@ def format_rightcodes_draw_model_switch_success(balance: RightCodesDrawPointBala
             f"已切换生图模型：{balance.model}",
             f"单次消耗：{cost_points} 积分",
             description,
-            "之后发送“棉花糖生图 提示词”就会使用这个模型。",
+            "之后发送“文生图 提示词”或“图生图 提示词”就会使用这个模型。",
         ]
     )
 
 
 def format_rightcodes_draw_model_switch_invalid(candidate: str) -> str:
     candidate = str(candidate or "").strip()
-    first_line = f"不支持这个生图模型：{candidate}" if candidate else "请指定要切换的生图模型。"
+    first_line = f"不支持这个生图模型：{candidate}" if candidate else "当前只有一个生图模型，无需切换。"
     return "\n".join(
         [
             first_line,
-            "查看模型：生图模型",
-            "切换用法：切换生图模型 模型名",
+            f"唯一可用模型：{RIGHTCODES_DRAW_DEFAULT_MODEL}",
+            "生图用法：文生图 提示词；图生图 提示词（附图或引用）",
         ]
     )
 
@@ -643,9 +600,9 @@ def format_draw_start_message(quota: RightCodesDrawQuotaResult) -> str:
 def format_draw_quota_exceeded_message(quota: RightCodesDrawQuotaResult) -> str:
     return (
         f"积分不够啦：{quota.model} 需要 {quota.cost_points} 积分"
-        f"（价格 ${quota.price} x 倍率 {quota.multiplier}），"
+        f"（价格 {quota.price} 元），"
         f"你现在有 {quota.balance_before} 积分。"
-        "可发送“生图模型”查看价格，或用“切换生图模型 模型名”切换后重试。"
+        "可发送“查看积分”查询余额，通过群消息继续累计积分。"
     )
 
 
@@ -666,24 +623,22 @@ def format_rightcodes_draw_success(
 def format_rightcodes_draw_failure(exc: Exception) -> str:
     return (
         f"❌ 生成失败: {extract_rightcodes_draw_error_message(exc)}。"
-        "本次扣除的积分已退回。可发送“生图模型”查看模型，"
-        "或用“切换生图模型 模型名”切换后重试。"
+        "本次扣除的积分已退回，请稍后重试。"
     )
 
 
 def format_rightcodes_draw_timeout(timeout_seconds: float) -> str:
     return (
-        f"❌ 生成失败: RightCodes 生图超过 {timeout_seconds:.0f} 秒还没返回，"
-        "本次扣除的积分已退回。可发送“生图模型”查看模型，"
-        "或用“切换生图模型 模型名”切换后重试。"
+        f"❌ 生成失败: 生图超过 {timeout_seconds:.0f} 秒还没返回，"
+        "本次扣除的积分已退回，请稍后重试。"
     )
 
 
 def extract_rightcodes_draw_error_message(exc: Exception) -> str:
     if isinstance(exc, RightCodesDrawTimeoutError):
-        return f"RightCodes 生图超过 {exc.timeout_seconds:.0f} 秒未返回"
+        return f"生图超过 {exc.timeout_seconds:.0f} 秒未返回"
     if isinstance(exc, TimeoutError):
-        return "RightCodes 生图请求超时"
+        return "生图请求超时"
     if isinstance(exc, HTTPError):
         detail = read_http_error_detail(exc)
         return detail or f"上游返回 HTTP {exc.code}"
@@ -708,38 +663,6 @@ def format_rightcodes_draw_model_price(model: str) -> str:
     return f"{get_rightcodes_draw_model_price(model):.2f}"
 
 
-async def post_json(
-    url: str,
-    headers: dict[str, str],
-    payload: dict[str, object],
-    timeout: float,
-) -> object:
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = Request(url, data=body, headers=headers, method="POST")
-    return await run_urlopen_json(request, timeout)
-
-
-async def get_json(
-    url: str,
-    headers: dict[str, str],
-    timeout: float,
-) -> object:
-    request = Request(url, headers=headers, method="GET")
-    return await run_urlopen_json(request, timeout)
-
-
-async def run_urlopen_json(request: Request, timeout: float) -> object:
-    def read_response() -> object:
-        with urlopen(request, timeout=timeout) as response:
-            status = int(getattr(response, "status", 200))
-            if status >= 400:
-                raise RuntimeError(f"RightCodes draw request failed: {status}")
-            body = response.read().decode("utf-8")
-        return json.loads(body)
-
-    return await asyncio.to_thread(read_response)
-
-
 def read_http_error_detail(exc: HTTPError) -> str:
     try:
         body = exc.read().decode("utf-8", errors="replace")
@@ -761,30 +684,6 @@ def read_http_error_detail(exc: HTTPError) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return body[:200]
-
-
-def extract_rightcodes_draw_task_id(data: object) -> str:
-    if not isinstance(data, dict):
-        return ""
-    value = data.get("task_id")
-    return value.strip() if isinstance(value, str) else ""
-
-
-def extract_rightcodes_task_status(data: object) -> str:
-    if not isinstance(data, dict):
-        return ""
-    value = data.get("status")
-    return value.strip().lower() if isinstance(value, str) else ""
-
-
-def extract_rightcodes_task_progress(data: object) -> int | None:
-    if not isinstance(data, dict):
-        return None
-    value = data.get("progress")
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
 
 
 def extract_rightcodes_task_error(data: object) -> str:
