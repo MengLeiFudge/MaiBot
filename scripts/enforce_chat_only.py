@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""在 MaiBot 启动前强制应用夜凛 chat-only 插件策略。"""
+"""在 MaiBot 启动前强制应用夜凛最小插件允许策略。"""
 
 from pathlib import Path
 
@@ -12,7 +12,7 @@ import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = PROJECT_ROOT / "plugins"
-ALLOWED_PLUGIN = "napcat_adapter"
+ALLOWED_PLUGINS = frozenset({"napcat_adapter", "qqbot_knowledge", "qqbot_poke", "qqbot_identity", "qqbot_visual"})
 PLUGIN_MANAGEMENT_CONFIG = PROJECT_ROOT / "src" / "plugins" / "built_in" / "plugin_management" / "config.toml"
 PLUGIN_SECTION_RE = re.compile(
     r"^(?P<header>\[plugin\][^\S\r\n]*(?:\r?\n|$))(?P<body>.*?)(?=^\[|\Z)",
@@ -79,7 +79,7 @@ def main() -> int:
     targets = [
         directory / "config.toml"
         for directory in sorted(PLUGIN_ROOT.iterdir(), key=lambda item: item.name)
-        if directory.is_dir() and directory.name != ALLOWED_PLUGIN
+        if directory.is_dir() and directory.name not in ALLOWED_PLUGINS
     ]
     targets.append(PLUGIN_MANAGEMENT_CONFIG)
 
@@ -91,11 +91,11 @@ def main() -> int:
             corrections.append(target.relative_to(PROJECT_ROOT))
 
     if corrections:
-        print("chat-only 策略已纠正以下插件配置：")
+        print("夜凛插件策略已纠正以下配置：")
         for corrected in corrections:
             print(f"- {corrected.as_posix()}")
     else:
-        print("chat-only 策略已满足，无需修改。")
+        print("夜凛插件策略已满足，无需修改。")
     return 0
 
 
@@ -103,5 +103,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (OSError, RuntimeError) as exc:
-        print(f"chat-only 策略执行失败：{exc}", file=sys.stderr)
+        print(f"夜凛插件策略执行失败：{exc}", file=sys.stderr)
         sys.exit(1)

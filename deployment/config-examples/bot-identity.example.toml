@@ -7,6 +7,29 @@ platforms = []
 nickname = "夜凛"
 alias_names = ["夜凛"]
 
+[visual]
+planner_mode = "text"
+replyer_mode = "text"
+wait_image_recognize_max_time = 15.0 # 文本规划最多等后台图片描述 15 秒；不改变识图任务自身超时。
+
+[emoji]
+steal_emoji = false
+
+[chat]
+mid_term_memory = false # 停止生成和召回中期回想，保留最近聊天上下文。
+
+[chat.reply_timing]
+reply_trigger_mode = "reply_necessity"
+talk_value = 0.4 # 配合原生80分门槛，让普通交流有机会触发；不是40%的回复概率。
+no_action_backoff_base_seconds = 120.0 # 一次无动作后，普通群消息退避2分钟。
+no_action_backoff_cap_seconds = 600.0 # 连续无动作最多退避10分钟。
+no_action_backoff_start_count = 1
+no_action_backoff_bypass_pending_count = 0 # 消息积压不绕过退避，本人呼叫沿用原生强制触发。
+
+[a_memorix.integration]
+person_fact_writeback_enabled = false # 停止回复后的人物事实提取，不删除已有记忆。
+chat_summary_writeback_enabled = false # 停止自动生成长期聊天摘要。
+
 [webui]
 enabled = true
 host = ["127.0.0.1", "::1"]
