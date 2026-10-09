@@ -27,6 +27,7 @@ from .sub2api_usage import Sub2APIUserUsage
 from .sub2api_usage import format_sub2api_usage_alert_message
 from .sub2api_usage import format_sub2api_usage_response
 from .sub2api_usage import retain_failed_account_ranking
+from .sub2api_usage import supports_sub2api_account_seven_day_ranking
 from .sub2api_usage import update_sub2api_usage_alert_state
 from .sub2api_usage_image import render_sub2api_usage_image
 
@@ -330,6 +331,8 @@ class QQBotUsagePlugin(MaiBotPlugin):
             ranking_now = datetime.now(timezone.utc)
             refreshed_rankings: list[Sub2APIAccountSevenDayRanking] = []
             for account in accounts:
+                if not supports_sub2api_account_seven_day_ranking(account):
+                    continue
                 refreshed_rankings.append(
                     await self._refresh_account_ranking(
                         account,
@@ -457,6 +460,21 @@ class QQBotUsagePlugin(MaiBotPlugin):
         )
         paths = [usage_path]
         radar_path = self._codexradar_image_path
+        if self.config.codexradar.enabled and (radar_path is None or not radar_path.is_file()):
+            try:
+                radar_snapshot = await asyncio.to_thread(
+                    fetch_codexradar_efficiency,
+                    url=self.config.codexradar.url,
+                    timeout_seconds=self.config.codexradar.timeout_seconds,
+                )
+                radar_path = await asyncio.to_thread(
+                    render_codexradar_efficiency_image,
+                    snapshot=radar_snapshot,
+                    output_dir=self._cache_root() / "codexradar",
+                )
+                self._codexradar_image_path = radar_path
+            except Exception as radar_exc:
+                self.ctx.logger.warning("用量命令补刷 CodexRadar 智力效率图失败: %s", radar_exc)
         if radar_path is not None and radar_path.is_file():
             paths.append(radar_path)
         return paths

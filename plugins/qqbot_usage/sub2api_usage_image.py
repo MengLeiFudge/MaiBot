@@ -16,6 +16,7 @@ from .sub2api_usage import Sub2APIUserUsage
 from .sub2api_usage import format_datetime, format_time_text
 from .sub2api_usage import format_sub2api_user_name
 from .sub2api_usage import format_usage_window
+from .sub2api_usage import supports_sub2api_account_seven_day_ranking
 
 
 CANVAS_WIDTH = 1240
@@ -36,7 +37,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     payload = {
         "kind": "sub2api-usage",
         "snapshot": asdict(snapshot),
-        "version": 7,
+        "version": 8,
     }
     image_path = _cached_path(output_dir, payload)
     if image_path.is_file():
@@ -47,22 +48,27 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
         ranking.account_id: ranking
         for ranking in snapshot.account_seven_day_rankings
     }
-    account_sections = [
-        (
-            account,
-            _account_height(account),
-            rankings_by_account.get(
+    account_sections: list[
+        tuple[Sub2APIAccountUsage, int, Sub2APIAccountSevenDayRanking | None]
+    ] = []
+    for account in snapshot.accounts:
+        ranking = None
+        if supports_sub2api_account_seven_day_ranking(account):
+            ranking = rankings_by_account.get(
                 account.account_id,
                 Sub2APIAccountSevenDayRanking(account_id=account.account_id),
-            ),
-        )
-        for account in snapshot.accounts
-    ]
+            )
+        account_sections.append((account, _account_height(account), ranking))
     status_height = _status_height(snapshot)
     user_height = _user_table_height(snapshot.users)
     if account_sections:
         account_content_height = sum(
-            account_height + _account_ranking_table_height(ranking) + 80
+            account_height
+            + (
+                _account_ranking_table_height(ranking) + 80
+                if ranking is not None
+                else 26
+            )
             for _, account_height, ranking in account_sections
         )
     else:
@@ -84,7 +90,7 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     draw.text((MARGIN, 36), "Sub2API 用量报告", font=fonts.title, fill=INK)
     draw.text(
         (MARGIN + 2, 98),
-        "各账号当前7d周期榜与额度来自后台缓存；底部消费按 Asia/Shanghai 08:00 业务日边界统计。",
+        "额度按接口窗口展示；OpenAI OAuth 附7d榜；消费按上海时区 08:00 统计。",
         font=fonts.subtitle,
         fill=MUTED,
     )
@@ -99,7 +105,11 @@ def render_sub2api_usage_image(*, snapshot: Sub2APIUsageSnapshot, output_dir: Pa
     else:
         for account, account_height, ranking in account_sections:
             _draw_account_panel(draw, fonts, account, y, account_height)
-            y += account_height + 14
+            y += account_height
+            if ranking is None:
+                y += 26
+                continue
+            y += 14
             draw.text(
                 (MARGIN, y),
                 f"当前账号7d周期消费榜  共 {len(ranking.users)} 人",
@@ -166,17 +176,29 @@ def _draw_status(
     return y + height
 
 
-def _account_height(usage: Sub2APIAccountUsage) -> int:
-    rows = 1
-    rows += max(1, len(_wrap_text(_account_meta(usage), 62)))
-    rows += max(1, len(_wrap_text(f"5h：{format_usage_window(usage.five_hour)}", 62)))
-    rows += max(1, len(_wrap_text(f"7d：{format_usage_window(usage.seven_day)}", 62)))
+def _account_rows(
+    usage: Sub2APIAccountUsage,
+) -> list[tuple[str, tuple[int, int, int]]]:
+    """Build the shared, platform-aware rows used for measuring and drawing a card."""
+    rows = [(_account_meta(usage), MUTED)]
+    rows.extend(
+        (f"{quota_window.label}：{format_usage_window(quota_window.usage)}", INK)
+        for quota_window in usage.quota_windows
+    )
     if usage.last_used_at:
-        rows += 1
+        rows.append((f"最近使用：{format_time_text(usage.last_used_at)}", MUTED))
     if usage.updated_at:
-        rows += 1
+        rows.append((f"上游更新时间：{format_time_text(usage.updated_at)}", MUTED))
     if usage.error:
-        rows += max(1, len(_wrap_text(f"错误：{usage.error}", 62)))
+        rows.append((f"错误：{usage.error}", ERROR))
+    return rows
+
+
+def _account_height(usage: Sub2APIAccountUsage) -> int:
+    rows = 1 + sum(
+        max(1, len(_wrap_text(text, 62)))
+        for text, _ in _account_rows(usage)
+    )
     return 28 + rows * 30 + 16
 
 
@@ -197,18 +219,7 @@ def _draw_account_panel(
     )
     draw.text((MARGIN + 22, y + 16), title, font=fonts.body_bold, fill=INK)
     text_y = y + 54
-    rows = [
-        (_account_meta(usage), MUTED),
-        (f"5h：{format_usage_window(usage.five_hour)}", INK),
-        (f"7d：{format_usage_window(usage.seven_day)}", INK),
-    ]
-    if usage.last_used_at:
-        rows.append((f"最近使用：{format_time_text(usage.last_used_at)}", MUTED))
-    if usage.updated_at:
-        rows.append((f"上游更新时间：{format_time_text(usage.updated_at)}", MUTED))
-    if usage.error:
-        rows.append((f"错误：{usage.error}", ERROR))
-    for text, color in rows:
+    for text, color in _account_rows(usage):
         for line in _wrap_text(text, 62):
             draw.text((MARGIN + 22, text_y), line, font=fonts.small, fill=color)
             text_y += 30

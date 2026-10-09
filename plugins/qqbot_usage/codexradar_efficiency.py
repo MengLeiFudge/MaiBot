@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 CODEXRADAR_EFFICIENCY_URL = "https://codexradar.com/data/intelligence-efficiency.json"
 CANVAS_WIDTH = 1240
-MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_POINTS = 48
 EFFORT_ORDER = ("ultra", "max", "xhigh", "high", "medium", "low")
 FAMILY_ORDER = ("sol", "terra", "luna", "5.5", "deepseek")

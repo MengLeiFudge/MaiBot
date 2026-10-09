@@ -22,6 +22,31 @@ SUB2API_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
+SUB2API_ANTIGRAVITY_QUOTA_GROUPS = (
+    (
+        "G3P",
+        ("gemini-3-pro-low", "gemini-3-pro-high", "gemini-3-pro-preview"),
+    ),
+    ("G3F", ("gemini-3-flash",)),
+    (
+        "G31FI",
+        ("gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3-pro-image"),
+    ),
+    (
+        "Claude",
+        (
+            "claude-fable-5-1",
+            "claude-fable-5",
+            "claude-sonnet-4-5",
+            "claude-opus-4-5-thinking",
+            "claude-sonnet-4-6",
+            "claude-opus-4-6",
+            "claude-opus-4-6-thinking",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +80,14 @@ class Sub2APIUsageWindow:
 
 
 @dataclass(frozen=True, slots=True)
+class Sub2APIQuotaWindow:
+    """One platform-defined quota window and its report label."""
+
+    label: str
+    usage: Sub2APIUsageWindow | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Sub2APIAccountUsage:
     account_id: int
     name: str
@@ -68,6 +101,7 @@ class Sub2APIAccountUsage:
     five_hour: Sub2APIUsageWindow | None = None
     seven_day: Sub2APIUsageWindow | None = None
     error: str = ""
+    quota_windows: tuple[Sub2APIQuotaWindow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +262,8 @@ def update_sub2api_usage_alert_state(
     alerts: list[Sub2APIUsageAlert] = []
     current_keys = set()
     for usage in usages:
+        if not supports_sub2api_account_seven_day_ranking(usage):
+            continue
         account_key = sub2api_alert_account_key(usage)
         current_keys.add(account_key)
         utilization = usage.five_hour.utilization if usage.five_hour is not None else None
@@ -256,6 +292,41 @@ def sub2api_alert_account_key(usage: Sub2APIAccountUsage) -> str:
     return f"name:{normalize_cache_key(usage.name)}"
 
 
+def supports_sub2api_account_seven_day_ranking(usage: Sub2APIAccountUsage) -> bool:
+    """Return whether an account owns OpenAI's fixed 5h/7d quota cycle."""
+    return (
+        usage.platform.strip().casefold() == "openai"
+        and usage.account_type.strip().casefold() == "oauth"
+        and usage.status.strip().casefold() != "inactive"
+    )
+
+
+def is_disabled_sub2api_account(account: dict[str, Any]) -> bool:
+    """Identify accounts explicitly disabled by status or the scheduling switch."""
+    account_payload = ensure_dict(account.get("account") or account)
+    status = account_payload.get("status") or account.get("status") or ""
+    schedulable = account_payload.get("schedulable", account.get("schedulable"))
+    return str(status).strip().casefold() == "inactive" or schedulable is False
+
+
+def supports_sub2api_usage_endpoint(account: dict[str, Any]) -> bool:
+    """Mirror the account types for which Sub2API exposes upstream quota data."""
+    account_payload = ensure_dict(account.get("account") or account)
+    platform = str(account_payload.get("platform") or account.get("platform") or "").strip().casefold()
+    account_type = str(
+        account_payload.get("type")
+        or account_payload.get("account_type")
+        or account.get("type")
+        or account.get("account_type")
+        or ""
+    ).strip().casefold()
+    if platform == "gemini":
+        return True
+    if platform == "anthropic":
+        return account_type in {"oauth", "setup-token"}
+    return platform in {"antigravity", "grok", "openai"} and account_type == "oauth"
+
+
 class Sub2APIClient:
     def __init__(
         self,
@@ -278,8 +349,14 @@ class Sub2APIClient:
         accounts = await self.list_accounts()
         results: list[Sub2APIAccountUsage] = []
         for account in accounts:
-            account_id = int(account.get("id") or 0)
+            if is_disabled_sub2api_account(account):
+                continue
+            account_payload = ensure_dict(account.get("account") or account)
+            account_id = int(account_payload.get("id") or account.get("id") or 0)
             if account_id <= 0:
+                continue
+            if not supports_sub2api_usage_endpoint(account):
+                results.append(build_account_usage(account, {}))
                 continue
             try:
                 usage = await self.fetch_usage(account_id, force_refresh=force_refresh)
@@ -588,20 +665,195 @@ def format_sub2api_http_error(status_code: int, detail: str) -> str:
 
 def build_account_usage(account: dict[str, Any], usage: dict[str, Any]) -> Sub2APIAccountUsage:
     account_payload = ensure_dict(account.get("account") or account)
+    platform = str(account_payload.get("platform") or account.get("platform") or "")
+    account_type = str(
+        account_payload.get("type")
+        or account_payload.get("account_type")
+        or account.get("type")
+        or account.get("account_type")
+        or ""
+    )
+    five_hour = parse_usage_window(usage.get("five_hour"))
+    seven_day = parse_usage_window(usage.get("seven_day"))
     return Sub2APIAccountUsage(
         account_id=int(account_payload.get("id") or account.get("id") or 0),
         name=str(account_payload.get("name") or account.get("name") or ""),
-        platform=str(account_payload.get("platform") or account.get("platform") or ""),
-        account_type=str(account_payload.get("type") or account.get("type") or ""),
+        platform=platform,
+        account_type=account_type,
         status=str(account_payload.get("status") or account.get("status") or ""),
         current_concurrency=optional_int(account.get("current_concurrency")),
         last_used_at=str(account_payload.get("last_used_at") or account.get("last_used_at") or ""),
         source=str(usage.get("source") or ""),
         updated_at=str(usage.get("updated_at") or ""),
-        five_hour=parse_usage_window(usage.get("five_hour")),
-        seven_day=parse_usage_window(usage.get("seven_day")),
+        five_hour=five_hour,
+        seven_day=seven_day,
+        quota_windows=build_account_quota_windows(
+            platform,
+            account_type,
+            usage,
+            five_hour,
+            seven_day,
+        ),
         error=str(usage.get("error") or ""),
     )
+
+
+def build_account_quota_windows(
+    platform: str,
+    account_type: str,
+    usage: dict[str, Any],
+    five_hour: Sub2APIUsageWindow | None,
+    seven_day: Sub2APIUsageWindow | None,
+) -> tuple[Sub2APIQuotaWindow, ...]:
+    """Normalize only quota windows that the account's platform actually owns."""
+    normalized_platform = platform.strip().casefold()
+    normalized_type = account_type.strip().casefold()
+    if normalized_platform == "openai":
+        if normalized_type != "oauth":
+            return ()
+        return (
+            Sub2APIQuotaWindow(label="5h", usage=five_hour),
+            Sub2APIQuotaWindow(label="7d", usage=seven_day),
+        )
+    if normalized_platform == "antigravity":
+        return build_antigravity_quota_windows(usage.get("antigravity_quota"))
+    if normalized_platform == "grok":
+        return build_grok_quota_windows(usage)
+    if normalized_platform == "anthropic":
+        return parse_present_quota_windows(
+            usage,
+            (
+                ("5h", "five_hour"),
+                ("7d", "seven_day"),
+                ("7d S", "seven_day_sonnet"),
+                ("7d F", "seven_day_fable"),
+            ),
+        )
+    if normalized_platform == "gemini":
+        shared_daily = parse_usage_window(usage.get("gemini_shared_daily"))
+        if shared_daily is not None:
+            return (Sub2APIQuotaWindow(label="1d", usage=shared_daily),)
+        return parse_present_quota_windows(
+            usage,
+            (
+                ("Pro", "gemini_pro_daily"),
+                ("Flash", "gemini_flash_daily"),
+            ),
+        )
+    return ()
+
+
+def parse_present_quota_windows(
+    usage: dict[str, Any],
+    fields: tuple[tuple[str, str], ...],
+) -> tuple[Sub2APIQuotaWindow, ...]:
+    windows: list[Sub2APIQuotaWindow] = []
+    for label, field_name in fields:
+        window = parse_usage_window(usage.get(field_name))
+        if window is not None:
+            windows.append(Sub2APIQuotaWindow(label=label, usage=window))
+    return tuple(windows)
+
+
+def build_antigravity_quota_windows(value: object) -> tuple[Sub2APIQuotaWindow, ...]:
+    """Aggregate Antigravity model quotas exactly as the Sub2API account page does."""
+    if not isinstance(value, dict):
+        return ()
+    windows: list[Sub2APIQuotaWindow] = []
+    for label, model_names in SUB2API_ANTIGRAVITY_QUOTA_GROUPS:
+        model_windows = [
+            parse_usage_window(value.get(model_name))
+            for model_name in model_names
+            if isinstance(value.get(model_name), dict)
+        ]
+        present_windows = [window for window in model_windows if window is not None]
+        if not present_windows:
+            continue
+        utilizations = [window.utilization for window in present_windows if window.utilization is not None]
+        reset_times = [window.resets_at for window in present_windows if window.resets_at]
+        remaining_values = [
+            window.remaining_seconds
+            for window in present_windows
+            if window.remaining_seconds is not None
+        ]
+        windows.append(
+            Sub2APIQuotaWindow(
+                label=label,
+                usage=Sub2APIUsageWindow(
+                    utilization=max(utilizations) if utilizations else None,
+                    resets_at=min(reset_times) if reset_times else "",
+                    remaining_seconds=min(remaining_values) if remaining_values else None,
+                ),
+            )
+        )
+    return tuple(windows)
+
+
+def build_grok_quota_windows(usage: dict[str, Any]) -> tuple[Sub2APIQuotaWindow, ...]:
+    """Build Grok's actual 24h free-tier or billing-period quota windows."""
+    local_24h = parse_window_stats(usage.get("grok_local_usage_24h"))
+    token_limit = optional_float(usage.get("grok_free_token_limit"))
+    if local_24h is not None and token_limit is not None and token_limit > 0:
+        utilization = min(100.0, max(0.0, local_24h.tokens / token_limit * 100.0))
+        return (
+            Sub2APIQuotaWindow(
+                label="24h",
+                usage=Sub2APIUsageWindow(
+                    utilization=utilization,
+                    window_stats=local_24h,
+                ),
+            ),
+        )
+
+    billing = ensure_dict(usage.get("grok_billing"))
+    if not billing:
+        return ()
+    windows: list[Sub2APIQuotaWindow] = []
+    period_type = str(billing.get("period_type") or "").strip().casefold()
+    weekly_utilization = optional_float(billing.get("usage_percent"))
+    if period_type == "weekly" and weekly_utilization is not None:
+        weekly_stats = parse_window_stats(usage.get("grok_local_usage_7d"))
+        if weekly_stats is None:
+            seven_day = parse_usage_window(usage.get("seven_day"))
+            weekly_stats = seven_day.window_stats if seven_day is not None else None
+        windows.append(
+            Sub2APIQuotaWindow(
+                label="7d",
+                usage=Sub2APIUsageWindow(
+                    utilization=min(100.0, max(0.0, weekly_utilization)),
+                    resets_at=str(billing.get("period_end") or ""),
+                    window_stats=weekly_stats,
+                ),
+            )
+        )
+
+    monthly_utilization = optional_float(billing.get("used_percent"))
+    monthly_limit_cents = optional_float(billing.get("monthly_limit_cents"))
+    if monthly_utilization is None and monthly_limit_cents is not None and monthly_limit_cents > 0:
+        used_cents = optional_float(billing.get("used_cents")) or 0.0
+        monthly_utilization = used_cents / monthly_limit_cents * 100.0
+    if monthly_utilization is not None and not (
+        period_type == "weekly" and monthly_limit_cents is None
+    ):
+        monthly_stats = parse_window_stats(usage.get("grok_local_usage_monthly"))
+        if monthly_stats is None:
+            thirty_day = parse_usage_window(usage.get("thirty_day"))
+            monthly_stats = thirty_day.window_stats if thirty_day is not None else None
+        windows.append(
+            Sub2APIQuotaWindow(
+                label="30d",
+                usage=Sub2APIUsageWindow(
+                    utilization=min(100.0, max(0.0, monthly_utilization)),
+                    resets_at=str(
+                        billing.get("billing_period_end")
+                        or billing.get("period_end")
+                        or ""
+                    ),
+                    window_stats=monthly_stats,
+                ),
+            )
+        )
+    return tuple(windows)
 
 
 def parse_usage_window(value: object) -> Sub2APIUsageWindow | None:
@@ -609,7 +861,7 @@ def parse_usage_window(value: object) -> Sub2APIUsageWindow | None:
         return None
     return Sub2APIUsageWindow(
         utilization=optional_float(value.get("utilization")),
-        resets_at=str(value.get("resets_at") or ""),
+        resets_at=str(value.get("resets_at") or value.get("reset_time") or ""),
         remaining_seconds=optional_int(value.get("remaining_seconds")),
         window_stats=parse_window_stats(value.get("window_stats")),
     )
@@ -783,25 +1035,29 @@ def format_sub2api_usage_response(snapshot: Sub2APIUsageSnapshot) -> str:
     for index, account in enumerate(snapshot.accounts, start=1):
         account_name = account.name or str(account.account_id)
         lines.extend(format_sub2api_usage_message(account, title=f"{index}. {account_name}").splitlines())
-        ranking = find_account_seven_day_ranking(snapshot.account_seven_day_rankings, account.account_id)
-        lines.append(f"{account_name} 当前账号7d周期消费榜：")
-        if ranking is None or ranking.refreshed_at is None:
-            lines.append("刷新：暂无成功数据")
-        else:
-            lines.append(f"刷新：{format_datetime(ranking.refreshed_at)}")
-        if ranking is not None and ranking.error:
-            if ranking.refreshed_at is None:
-                lines.append(f"刷新失败：{ranking.error}")
-            else:
-                lines.append(f"刷新失败，已保留上次成功缓存：{ranking.error}")
-        ranking_users = ranking.users if ranking is not None else ()
-        if not ranking_users:
-            lines.append("当前账号7d周期内暂无消费用户。")
-        for user_index, usage in enumerate(ranking_users, start=1):
-            lines.append(
-                f"{user_index}. {format_sub2api_user_name(usage)}："
-                f"${usage.actual_cost:.2f}"
+        if supports_sub2api_account_seven_day_ranking(account):
+            ranking = find_account_seven_day_ranking(
+                snapshot.account_seven_day_rankings,
+                account.account_id,
             )
+            lines.append(f"{account_name} 当前账号7d周期消费榜：")
+            if ranking is None or ranking.refreshed_at is None:
+                lines.append("刷新：暂无成功数据")
+            else:
+                lines.append(f"刷新：{format_datetime(ranking.refreshed_at)}")
+            if ranking is not None and ranking.error:
+                if ranking.refreshed_at is None:
+                    lines.append(f"刷新失败：{ranking.error}")
+                else:
+                    lines.append(f"刷新失败，已保留上次成功缓存：{ranking.error}")
+            ranking_users = ranking.users if ranking is not None else ()
+            if not ranking_users:
+                lines.append("当前账号7d周期内暂无消费用户。")
+            for user_index, usage in enumerate(ranking_users, start=1):
+                lines.append(
+                    f"{user_index}. {format_sub2api_user_name(usage)}："
+                    f"${usage.actual_cost:.2f}"
+                )
     lines.append("全账号消费榜（当日 / 本周 / 30d，Asia/Shanghai 08:00 边界）：")
     if snapshot.users_refreshed_at:
         lines.append(f"用户刷新：{format_datetime(snapshot.users_refreshed_at)}")
@@ -868,8 +1124,8 @@ def format_sub2api_usage_message(usage: Sub2APIAccountUsage, *, title: str | Non
         meta.append(f"并发 {usage.current_concurrency}")
     if meta:
         lines.append(f"状态：{' / '.join(meta)}")
-    lines.append(f"5h：{format_usage_window(usage.five_hour)}")
-    lines.append(f"7d：{format_usage_window(usage.seven_day)}")
+    for quota_window in usage.quota_windows:
+        lines.append(f"{quota_window.label}：{format_usage_window(quota_window.usage)}")
     if usage.last_used_at:
         lines.append(f"最近使用：{format_time_text(usage.last_used_at)}")
     if usage.updated_at:
