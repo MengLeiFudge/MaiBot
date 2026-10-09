@@ -7,7 +7,6 @@ import random
 
 from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
-from qqbot_common.api_results import require_api_result
 
 from .decision import PokeDecision
 from .decision import build_poke_prompt
@@ -179,7 +178,8 @@ class QQBotPokePlugin(MaiBotPlugin):
             poke_text=f"{display_name}拍了拍你",
             state=observation.state,
         )
-        result = await self.ctx.llm.generate(prompt, temperature=0.4, max_tokens=120)
+        # model 接受 Host 的任务名；replyer 跟随聊天配置，避免默认选到 embedding 任务。
+        result = await self.ctx.llm.generate(prompt, model="replyer", temperature=0.4, max_tokens=120)
         if not isinstance(result, Mapping) or not result.get("success"):
             raise RuntimeError("拍一拍决策模型调用失败")
         response = str(result.get("response") or result.get("content") or "")
@@ -231,16 +231,23 @@ class QQBotPokePlugin(MaiBotPlugin):
         )
 
     async def _display_name(self, group_id: str, user_id: str) -> str:
-        result = await self.ctx.api.call("qqbot.identity.display_name", group_id=group_id, user_id=user_id)
-        payload = require_api_result(result, "拍一拍群昵称解析")
-        name = str(payload.get("display_name") or "").strip() if isinstance(payload, Mapping) else ""
+        result = await self.ctx.api.call(
+            "adapter.napcat.group.get_group_member_info",
+            group_id=group_id,
+            user_id=user_id,
+            no_cache=False,
+        )
+        payload = _require_api_result(result, "拍一拍群昵称解析")
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("拍一拍群成员信息格式无效")
+        name = str(payload.get("card") or payload.get("nickname") or "").strip()
         if not name:
             raise RuntimeError("拍一拍群昵称为空")
         return name
 
     async def _call_adapter(self, api_name: str, **kwargs: object) -> None:
         result = await self.ctx.api.call(api_name, **kwargs)
-        require_api_result(result, f"NapCat 动作 {api_name}")
+        _require_api_result(result, f"NapCat 动作 {api_name}")
 
     def _new_state_machine(self) -> PokeStateMachine:
         return PokeStateMachine(
@@ -248,6 +255,26 @@ class QQBotPokePlugin(MaiBotPlugin):
             mute_threshold=self.config.state.mute_threshold,
             mute_state_seconds=self.config.state.mute_state_seconds,
         )
+
+
+def _require_api_result(result: Any, label: str) -> Any:
+    """Unwrap SDK API envelopes and reject Host or OneBot failures."""
+
+    payload = result
+    if isinstance(result, Mapping) and "success" in result:
+        if not bool(result.get("success")):
+            raise RuntimeError(f"{label}失败")
+        if "result" in result:
+            payload = result.get("result")
+    if isinstance(payload, Mapping) and ("status" in payload or "retcode" in payload):
+        status = str(payload.get("status") or "ok").lower()
+        try:
+            retcode = int(payload.get("retcode") or 0)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"{label}返回无效 retcode") from exc
+        if status not in {"ok", "success"} or retcode != 0:
+            raise RuntimeError(f"{label}失败")
+    return payload
 
 
 def _parse_poke_notice(message: object) -> dict[str, str] | None:
