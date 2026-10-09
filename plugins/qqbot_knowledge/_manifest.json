@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-knowledge",
-  "version": "0.1.0",
-  "name": "QQBot Source Knowledge",
-  "description": "Injects bounded local source evidence into one MaiBot replyer request.",
+  "version": "0.2.0",
+  "name": "QQBot Knowledge",
+  "description": "Injects shared DSP vector evidence and bounded local non-DSP source evidence into one MaiBot replyer request.",
   "author": {
     "name": "MLJ",
     "url": "https://github.com/MengLeiFudge"
@@ -16,7 +16,7 @@
   },
   "host_application": {
     "min_version": "1.1.0",
-    "max_version": "1.1.99"
+    "max_version": "1.2.3"
   },
   "sdk": {
     "min_version": "2.7.0",

@@ -1,6 +1,11 @@
 [plugin]
-enabled = false
-config_version = "0.1.0"
+enabled = true
+config_version = "0.2.0"
+
+[shared]
+endpoint = "http://127.0.0.1:8081/v1/knowledge/dsp/search"
+timeout_seconds = 22.0
+max_evidence_chars = 6000
 
 [search]
 max_results = 4
@@ -18,58 +23,6 @@ cache_max_entries = 128
 enabled_group_ids = []
 session_ttl_seconds = 600
 session_max_entries = 1024
-
-[[sources.roots]]
-domain = "dsp-vanilla"
-path = "D:/project/dsp/DSPCore/DSPCore"
-
-[[sources.roots]]
-domain = "dsp-vanilla"
-path = "D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/Assembly-CSharp"
-
-[[sources.roots]]
-domain = "fractionate-everything"
-path = "D:/project/dsp/MLJ_DSPmods/FractionateEverything/src"
-
-[[sources.roots]]
-domain = "fractionate-everything"
-path = "D:/project/dsp/MLJ_DSPmods/FractionateEverything/README.md"
-
-[[sources.roots]]
-domain = "dsp-mod-tools"
-path = "D:/project/dsp/MLJ_DSPmods/SaveDataExporter"
-
-[[sources.roots]]
-domain = "dsp-mod-tools"
-path = "D:/project/dsp/MLJ_DSPmods/UXAEnhance"
-
-[[sources.roots]]
-domain = "dsp-mod-tools"
-path = "D:/project/dsp/MLJ_DSPmods/AfterBuildEvent"
-
-[[sources.roots]]
-domain = "dsp-mod-tools"
-path = "D:/project/dsp/MLJ_DSPmods/GetDspData"
-
-[[sources.roots]]
-domain = "dsp-mod-tools"
-path = "D:/project/dsp/MLJ_DSPmods/VanillaCurveSim"
-
-[[sources.roots]]
-domain = "orbital-ring"
-path = "D:/project/dsp/OrbitalRing-MOD"
-
-[[sources.roots]]
-domain = "orbital-ring"
-path = "D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/ProjectOrbitalRing"
-
-[[sources.roots]]
-domain = "project-genesis"
-path = "D:/project/dsp/ProjectGenesis"
-
-[[sources.roots]]
-domain = "project-genesis"
-path = "D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/ProjectGenesis"
 
 [[sources.roots]]
 domain = "shapez"

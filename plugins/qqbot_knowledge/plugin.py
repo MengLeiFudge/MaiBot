@@ -11,6 +11,7 @@ from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 from .domains import resolve_domains
 from .messages import extract_last_user_query, inject_evidence
+from .shared_client import SharedDspKnowledgeClient
 from .source_index import RootSpec, SearchLimits, SourceIndex
 
 
@@ -18,8 +19,20 @@ class PluginSection(PluginConfigBase):
     __ui_label__ = "插件"
     __ui_order__ = 0
 
-    enabled: bool = Field(default=True, description="是否启用单次请求源码证据注入")
-    config_version: str = Field(default="0.1.0", description="配置版本")
+    enabled: bool = Field(default=True, description="是否启用共享知识证据注入")
+    config_version: str = Field(default="0.2.0", description="配置版本")
+
+
+class SharedSection(PluginConfigBase):
+    __ui_label__ = "共享 DSP 向量知识库"
+    __ui_order__ = 1
+
+    endpoint: str = Field(
+        default="http://127.0.0.1:8081/v1/knowledge/dsp/search",
+        description="云栖 AstrBot 提供的 localhost 检索接口",
+    )
+    timeout_seconds: float = Field(default=22.0, ge=1.0, le=30.0, description="共享检索总超时秒数")
+    max_evidence_chars: int = Field(default=6000, ge=800, le=12000, description="共享证据最大字符数")
 
 
 class SourceRootConfig(PluginConfigBase):
@@ -29,22 +42,6 @@ class SourceRootConfig(PluginConfigBase):
 
 def _default_roots() -> list[SourceRootConfig]:
     return [
-        SourceRootConfig(domain="dsp-vanilla", path="D:/project/dsp/DSPCore/DSPCore"),
-        SourceRootConfig(
-            domain="dsp-vanilla",
-            path="D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/Assembly-CSharp",
-        ),
-        SourceRootConfig(domain="fractionate-everything", path="D:/project/dsp/MLJ_DSPmods/FractionateEverything/src"),
-        SourceRootConfig(domain="fractionate-everything", path="D:/project/dsp/MLJ_DSPmods/FractionateEverything/README.md"),
-        SourceRootConfig(domain="dsp-mod-tools", path="D:/project/dsp/MLJ_DSPmods/SaveDataExporter"),
-        SourceRootConfig(domain="dsp-mod-tools", path="D:/project/dsp/MLJ_DSPmods/UXAEnhance"),
-        SourceRootConfig(domain="dsp-mod-tools", path="D:/project/dsp/MLJ_DSPmods/AfterBuildEvent"),
-        SourceRootConfig(domain="dsp-mod-tools", path="D:/project/dsp/MLJ_DSPmods/GetDspData"),
-        SourceRootConfig(domain="dsp-mod-tools", path="D:/project/dsp/MLJ_DSPmods/VanillaCurveSim"),
-        SourceRootConfig(domain="orbital-ring", path="D:/project/dsp/OrbitalRing-MOD"),
-        SourceRootConfig(domain="orbital-ring", path="D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/ProjectOrbitalRing"),
-        SourceRootConfig(domain="project-genesis", path="D:/project/dsp/ProjectGenesis"),
-        SourceRootConfig(domain="project-genesis", path="D:/project/dsp/MLJ_DSPmods/gamedata/DecompiledSource/ProjectGenesis"),
         SourceRootConfig(domain="shapez", path="D:/project/shapez/DecompiledSource/Game.Content"),
         SourceRootConfig(domain="shapez", path="D:/project/shapez/shapez-mods/src"),
         SourceRootConfig(domain="shapez", path="D:/project/shapez/shapezPathAnalyzer/shapezAnalyzer"),
@@ -53,39 +50,39 @@ def _default_roots() -> list[SourceRootConfig]:
 
 
 class SourcesSection(PluginConfigBase):
-    __ui_label__ = "源码根"
-    __ui_order__ = 1
+    __ui_label__ = "非 DSP 本地源码根"
+    __ui_order__ = 2
 
     roots: list[SourceRootConfig] = Field(
         default_factory=_default_roots,
-        max_length=64,
-        description="按域配置的只读源码或文档根",
+        max_length=16,
+        description="仅保留 Shapez 和 Factorio 的本地关键词检索根",
     )
 
 
 class SearchSection(PluginConfigBase):
     __ui_label__ = "检索预算"
-    __ui_order__ = 2
+    __ui_order__ = 3
 
     max_results: int = Field(default=4, ge=1, le=8, description="单次最多证据条数")
-    max_chars: int = Field(default=2600, ge=400, le=6000, description="单次证据正文最大字符数")
+    max_chars: int = Field(default=2600, ge=400, le=6000, description="本地证据正文最大字符数")
     max_files_per_domain: int = Field(
         default=80,
         ge=1,
         le=500,
-        description="每个根的候选上限及每次查询的单域读取上限",
+        description="每个本地知识域的候选和读取上限",
     )
-    max_file_bytes: int = Field(default=220_000, ge=1024, le=1_000_000, description="单文件读取上限")
+    max_file_bytes: int = Field(default=220_000, ge=1024, le=1_000_000, description="本地单文件读取上限")
     max_query_chars: int = Field(default=2000, ge=100, le=4000, description="最后 user 查询读取上限")
-    timeout_seconds: float = Field(default=3.0, ge=0.1, le=3.0, description="单次本地检索硬时限")
-    refresh_seconds: int = Field(default=600, ge=30, le=86_400, description="源路径索引刷新秒数")
-    cache_ttl_seconds: int = Field(default=600, ge=1, le=3600, description="相同检索结果复用秒数")
-    cache_max_entries: int = Field(default=128, ge=1, le=1024, description="检索结果缓存最大条数")
+    timeout_seconds: float = Field(default=3.0, ge=0.1, le=3.0, description="本地检索硬时限")
+    refresh_seconds: int = Field(default=600, ge=30, le=86_400, description="本地源路径索引刷新秒数")
+    cache_ttl_seconds: int = Field(default=600, ge=1, le=3600, description="相同本地检索结果复用秒数")
+    cache_max_entries: int = Field(default=128, ge=1, le=1024, description="本地检索结果缓存最大条数")
 
 
 class ScopeSection(PluginConfigBase):
     __ui_label__ = "会话范围"
-    __ui_order__ = 3
+    __ui_order__ = 4
 
     enabled_group_ids: list[str] = Field(
         default_factory=list,
@@ -97,6 +94,7 @@ class ScopeSection(PluginConfigBase):
 
 class KnowledgeConfig(PluginConfigBase):
     plugin: PluginSection = Field(default_factory=PluginSection)
+    shared: SharedSection = Field(default_factory=SharedSection)
     sources: SourcesSection = Field(default_factory=SourcesSection)
     search: SearchSection = Field(default_factory=SearchSection)
     scope: ScopeSection = Field(default_factory=ScopeSection)
@@ -145,19 +143,21 @@ class _SessionScopeMap:
 
 
 class QQBotKnowledgePlugin(MaiBotPlugin):
-    """Inject bounded local source evidence into one replyer request."""
+    """向单次 Replyer 请求注入共享 DSP 或本地非 DSP 源码证据。"""
 
     config_model: ClassVar[type[PluginConfigBase] | None] = KnowledgeConfig
 
     def __init__(self) -> None:
         super().__init__()
         self._index: SourceIndex | None = None
+        self._shared_client: SharedDspKnowledgeClient | None = None
         self._scope_map: _SessionScopeMap | None = None
 
     async def on_load(self) -> None:
         self._rebuild_runtime()
         self.ctx.logger.info(
-            "QQBot 源码知识插件已加载: domains=%s roots=%s",
+            "QQBot 知识插件已加载: shared_endpoint=%s local_domains=%s local_roots=%s",
+            self.shared_client.endpoint,
             len(self.index.available_domains),
             len(self.config.sources.roots),
         )
@@ -168,6 +168,7 @@ class QQBotKnowledgePlugin(MaiBotPlugin):
         if self._scope_map is not None:
             self._scope_map.clear()
         self._index = None
+        self._shared_client = None
         self._scope_map = None
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
@@ -175,7 +176,7 @@ class QQBotKnowledgePlugin(MaiBotPlugin):
         if scope != CONFIG_RELOAD_SCOPE_SELF:
             return
         self._rebuild_runtime()
-        self.ctx.logger.info("QQBot 源码知识配置已更新: version=%s", version)
+        self.ctx.logger.info("QQBot 知识配置已更新: version=%s", version)
 
     @HookHandler(
         "chat.receive.before_process",
@@ -196,61 +197,81 @@ class QQBotKnowledgePlugin(MaiBotPlugin):
     @HookHandler(
         "maisaka.replyer.before_model_request",
         name="qqbot_knowledge_injection",
-        description="按最后 user 查询向当前模型请求临时注入本地源码证据",
+        description="向当前模型请求临时注入共享向量或本地源码证据",
         mode=HookMode.BLOCKING,
         order=HookOrder.NORMAL,
-        timeout_ms=4000,
+        timeout_ms=25000,
         error_policy=ErrorPolicy.SKIP,
     )
     async def inject_source_knowledge(
         self,
-        messages: object = None,
+        items: object = None,
+        item_schema_version: int = 0,
         session_id: str = "",
         **kwargs: Any,
     ) -> dict[str, object]:
         if not self.config.plugin.enabled:
             return {"action": "continue"}
 
+        if item_schema_version != 1 or not isinstance(items, list):
+            raise ValueError("知识插件需要 Context Item schema 1 的 items 列表")
         started_at = time.monotonic()
         group_id = self.scope_map.resolve(str(session_id or ""))
         enabled_groups = {str(group).strip() for group in self.config.scope.enabled_group_ids if str(group).strip()}
         if enabled_groups and (not group_id or group_id not in enabled_groups):
             return {"action": "continue"}
 
-        query = extract_last_user_query(messages, max_chars=self.config.search.max_query_chars)
+        query = extract_last_user_query(items, max_chars=self.config.search.max_query_chars)
         if not query:
             return {"action": "continue"}
-        domains = resolve_domains(query, group_id, self.index.available_domains)
-        if not domains:
-            return {"action": "continue"}
 
-        try:
-            outcome = await asyncio.to_thread(self.index.search, query, domains)
-        except Exception as exc:
-            self.ctx.logger.warning("QQBot 源码知识检索失败: error_type=%s", type(exc).__name__)
-            return {"action": "continue"}
-        if not outcome.evidence:
-            self.ctx.logger.info(
-                "QQBot 源码知识无结果: domains=%s elapsed_ms=%s error_type=%s",
-                ",".join(outcome.domains),
-                int((time.monotonic() - started_at) * 1000),
-                "SearchTimeout" if outcome.timed_out else "None",
+        evidence = ""
+        domains: tuple[str, ...] = ()
+        result_count = 0
+        shared = await self.shared_client.search(query, group_id)
+        if shared.available and shared.matched:
+            evidence = shared.evidence
+            domains = ("dsp-major-mods",)
+            result_count = shared.hit_count
+        elif not shared.available:
+            self.ctx.logger.debug(
+                "QQBot 共享 DSP 知识检索不可用: error_type=%s",
+                shared.error_type or "UnknownError",
             )
+
+        if not shared.matched:
+            domains = resolve_domains(query, group_id, self.index.available_domains)
+            if domains:
+                try:
+                    outcome = await asyncio.to_thread(self.index.search, query, domains)
+                except Exception as exc:
+                    self.ctx.logger.warning("QQBot 本地源码知识检索失败: error_type=%s", type(exc).__name__)
+                    return {"action": "continue"}
+                evidence = outcome.evidence
+                result_count = outcome.result_count
+
+        if not evidence:
+            if domains:
+                self.ctx.logger.info(
+                    "QQBot 知识检索无结果: domains=%s elapsed_ms=%s",
+                    ",".join(domains),
+                    int((time.monotonic() - started_at) * 1000),
+                )
             return {"action": "continue"}
 
-        modified_messages = inject_evidence(messages, outcome.evidence)
-        if modified_messages is None:
+        modified_items = inject_evidence(items, evidence)
+        if modified_items is None:
             return {"action": "continue"}
         modified_kwargs = dict(kwargs)
         modified_kwargs["session_id"] = session_id
-        modified_kwargs["messages"] = modified_messages
+        modified_kwargs["items"] = modified_items
+        modified_kwargs["item_schema_version"] = item_schema_version
         self.ctx.logger.info(
-            "QQBot 源码知识已注入: domains=%s results=%s chars=%s elapsed_ms=%s error_type=%s",
-            ",".join(outcome.domains),
-            outcome.result_count,
-            outcome.char_count,
+            "QQBot 知识证据已注入: domains=%s results=%s chars=%s elapsed_ms=%s",
+            ",".join(domains),
+            result_count,
+            len(evidence),
             int((time.monotonic() - started_at) * 1000),
-            "SearchTimeout" if outcome.timed_out else "None",
         )
         return {"action": "continue", "modified_kwargs": modified_kwargs}
 
@@ -260,6 +281,13 @@ class QQBotKnowledgePlugin(MaiBotPlugin):
             self._rebuild_runtime()
         assert self._index is not None
         return self._index
+
+    @property
+    def shared_client(self) -> SharedDspKnowledgeClient:
+        if self._shared_client is None:
+            self._rebuild_runtime()
+        assert self._shared_client is not None
+        return self._shared_client
 
     @property
     def scope_map(self) -> _SessionScopeMap:
@@ -291,6 +319,11 @@ class QQBotKnowledgePlugin(MaiBotPlugin):
                 cache_ttl_seconds=search.cache_ttl_seconds,
                 cache_max_entries=search.cache_max_entries,
             ),
+        )
+        self._shared_client = SharedDspKnowledgeClient(
+            endpoint=self.config.shared.endpoint,
+            timeout_seconds=self.config.shared.timeout_seconds,
+            max_evidence_chars=self.config.shared.max_evidence_chars,
         )
         self._scope_map = _SessionScopeMap(
             ttl_seconds=self.config.scope.session_ttl_seconds,
