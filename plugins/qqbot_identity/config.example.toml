@@ -1,0 +1,7 @@
+[plugin]
+enabled = true
+config_version = "0.1.0"
+
+[identity]
+# 在本机 config.toml 中填写真实主人 QQ；留空表示不认定主人。
+owner_qq = ""

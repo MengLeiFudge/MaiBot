@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-identity",
+  "version": "0.1.0",
+  "name": "QQBot 受信身份",
+  "description": "通过公开请求 Hook 注入主人身份规则和同会话回复目标的真实发送者事实。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [],
+  "capabilities": ["message.get_by_id"],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}
