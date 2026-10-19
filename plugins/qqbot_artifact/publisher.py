@@ -7,6 +7,7 @@ from typing import Any
 
 import asyncio
 import base64
+import re
 
 from qqbot_common.api_results import require_api_result
 
@@ -247,15 +248,18 @@ class ArtifactPublisher:
 
 
 def build_publish_notice(context: PublishContext, file_message: str = "") -> str:
-    commit = context.commit_hash[:7]
-    subject = context.commit_subject.strip()
-    headline = f"{commit} {subject}".strip() or "本次构建"
+    """按分支、短提交号、标题和逐条编号的正文生成发布说明。"""
+    headline = f"{context.branch.strip()} {context.commit_hash.strip()[:7]}".strip() or "本次构建"
     lines = [headline]
-    if context.branch.strip():
-        lines.append(f"分支：{context.branch.strip()}")
+    subject = context.commit_subject.strip()
+    if subject:
+        lines.append(subject)
     detail = file_message.strip() or context.commit_detail.strip()
-    if detail:
-        lines.append(detail)
+    changes = [
+        re.sub(r"^(?:[-*]\s*|\d+[.)、]\s*)", "", line.strip()).strip()
+        for line in detail.splitlines() if line.strip()
+    ]
+    lines.extend(f"{index}.{change}" for index, change in enumerate(filter(None, changes), 1))
     return "\n".join(lines)
 
 
