@@ -148,10 +148,14 @@ class ArtifactPublisher:
                 )
                 reply_message_id = _extract_message_id(upload_payload)
                 if not reply_message_id:
+                    file_id = _first_text(upload_payload, "file_id") if isinstance(upload_payload, Mapping) else ""
+                    if not file_id:
+                        raise ArtifactRequestError("文件已上传，但协议端未返回可定位引用的文件ID。", status=502)
                     reply_message_id = await self._find_uploaded_file_message_id(
-                        group_id,
-                        verified.artifact.name,
+                        group_id, verified.artifact.name, file_id=file_id,
                     )
+                if not reply_message_id:
+                    raise ArtifactRequestError("文件已上传，但未找到对应的文件消息；发布说明未发送。", status=502)
                 self._state.save(
                     group_id,
                     PublicationState(
@@ -171,6 +175,7 @@ class ArtifactPublisher:
                         "name": verified.artifact.name,
                         "sha256": verified.sha256,
                         "content_sha256": verified.content_sha256,
+                        "reply_message_id": reply_message_id,
                     }
                 )
 
@@ -208,7 +213,7 @@ class ArtifactPublisher:
             deleted.append(file_name)
         return deleted
 
-    async def _find_uploaded_file_message_id(self, group_id: int, file_name: str) -> str:
+    async def _find_uploaded_file_message_id(self, group_id: int, file_name: str, *, file_id: str) -> str:
         for attempt in range(5):
             try:
                 payload = await self._call(
@@ -218,7 +223,7 @@ class ArtifactPublisher:
                 )
             except Exception:
                 payload = None
-            message_id = _extract_file_message_id(payload, file_name)
+            message_id = _extract_file_message_id(payload, file_name, file_id=file_id)
             if message_id:
                 return message_id
             if attempt < 4:
@@ -226,6 +231,8 @@ class ArtifactPublisher:
         return ""
 
     async def _send_notice(self, group_id: int, context: PublishContext, notice: _PendingNotice) -> None:
+        if not notice.reply_message_id:
+            raise ArtifactRequestError("缺少文件消息引用，发布说明未发送。", status=502)
         text = build_publish_notice(context, notice.file_message)
         message: list[dict[str, object]] = []
         if notice.reply_message_id:
@@ -304,19 +311,28 @@ def _extract_group_files(payload: Any) -> list[dict[str, Any]]:
 def _extract_message_id(payload: Any) -> str:
     if not isinstance(payload, Mapping):
         return ""
-    for key in ("message_id", "msg_id", "id"):
-        value = payload.get(key)
-        if value not in (None, ""):
-            return str(value)
+    for key in ("message_id", "msg_id"):
+        value = str(payload.get(key) or "")
+        if re.fullmatch(r"-?\d+", value):
+            return value
     return _extract_message_id(payload.get("data"))
 
 
-def _extract_file_message_id(payload: Any, file_name: str) -> str:
+def _extract_file_message_id(payload: Any, file_name: str, *, file_id: str) -> str:
     for message in reversed(_extract_history_messages(payload)):
-        if _contains_text(message, file_name):
-            message_id = _extract_message_id(message)
-            if message_id:
-                return message_id
+        # 用本次上传的文件ID匹配文件消息，不会误引用其他目录或旧版本的同名文件。
+        segments = message.get("message") if isinstance(message, Mapping) else None
+        if not isinstance(segments, list) or not any(
+            isinstance(segment, Mapping) and segment.get("type") == "file"
+            and isinstance(segment.get("data"), Mapping)
+            and str(segment["data"].get("file_id") or "") == file_id
+            and _first_text(segment["data"], "file", "name", "file_name") == file_name
+            for segment in segments
+        ):
+            continue
+        message_id = _extract_message_id(message)
+        if message_id:
+            return message_id
     return ""
 
 
