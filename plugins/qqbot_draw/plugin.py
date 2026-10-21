@@ -15,13 +15,14 @@ from maibot_sdk import Command, CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, Ma
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 from qqbot_common.api_results import require_api_result
 
-from .draw_input import DOUDOUYAN_AVATAR_COMMAND, STANDARD_DRAW_PREFIX, doudouyan_command_parts, prepare_explicit_draw_request, preload_draw_references
+from .draw_input import DOUDOUYAN_AVATAR_COMMAND, STANDARD_DRAW_PREFIX, doudouyan_command_parts, prepare_doudouyan_requests, prepare_explicit_draw_request, preload_draw_references
 from .draw_output import save_generated_image
 from .draw_intent import DRAW_INTENT_SYSTEM, DrawIntent, DrawIntentRouter
 from .draw_logic import RightCodesDrawClient
 from .draw_logic import RightCodesDrawQuotaResult
 from .draw_logic import RightCodesDrawQuotaStore
 from .draw_logic import RightCodesDrawRequest
+from .draw_logic import RightCodesDrawResult
 from .draw_logic import RightCodesDrawTimeoutError
 from .draw_logic import extract_removed_rightcodes_draw_temporary_model
 from .draw_logic import format_draw_quota_exceeded_message
@@ -432,6 +433,8 @@ class QQBotDrawPlugin(MaiBotPlugin):
                 )
                 if not preparation_error:
                     prepared_request = await preload_draw_references(prepared_request)
+            if not preparation_error:
+                draw_requests = prepare_doudouyan_requests(prepared_request) if preset_parts is not None else (prepared_request,)
         except Exception as exc:
             self.ctx.logger.warning("生图输入准备失败: error_type=%s", type(exc).__name__)
             detail = str(exc) if isinstance(exc, ValueError) else "原图读取失败或超时，请重新附图或引用"
@@ -458,7 +461,7 @@ class QQBotDrawPlugin(MaiBotPlugin):
                 start_message += ("\n提示词来源：豆豆眼预设（完整固定原文）" if preset_parts is not None
                                   else "\n提示词来源：用户话语（无预设）")
                 if preset_parts is not None:
-                    start_message += "\n本次按固定原文生成，不追加其他描述。"
+                    start_message += "\n韩文v1和中文v3各生成2张，四张并行，完成后全部发送。本次共扣一次积分。"
                     if intent is not None and intent.source is not None:
                         start_message += f"\n本次来源：{intent.source.label}"
                     elif _text_segments({"raw_message": preset_parts}).startswith("头像生图"):
@@ -474,7 +477,13 @@ class QQBotDrawPlugin(MaiBotPlugin):
                 base_url=self.config.rightcodes.base_url,
                 timeout_seconds=float(self.config.rightcodes.draw_timeout_seconds),
             )
-            result = await client.draw(prepared_request)
+            outcomes = await client.draw_batch(draw_requests)
+            results = tuple(item for item in outcomes if isinstance(item, RightCodesDrawResult))
+            if not results:
+                raise next(item for item in outcomes if isinstance(item, BaseException))
+            for item in outcomes:
+                if isinstance(item, BaseException):
+                    self.ctx.logger.warning("生图批次单张失败: error_type=%s", type(item).__name__)
         except asyncio.CancelledError:
             await asyncio.shield(asyncio.to_thread(self._refund_locked, runtime_root, quota))
             raise
@@ -493,26 +502,35 @@ class QQBotDrawPlugin(MaiBotPlugin):
             )
             return response
 
-        saved = None
-        try:
-            saved = await asyncio.to_thread(save_generated_image, result.image_bytes, runtime_root)
-        except Exception as exc:
-            self.ctx.logger.error("生图结果保存失败: error_type=%s", type(exc).__name__)
-        response = format_rightcodes_draw_success(result, model=quota.model)
-        if saved is not None:
-            source = saved.resolve().as_uri()
-        else:
-            response += "\n图片未保存到本地，已尝试直接交付，请及时保存。"
-            source = f"base64://{base64.b64encode(result.image_bytes).decode('ascii')}"
+        saved_paths = []
+        sources = []
+        for result in results:
+            saved = None
+            try:
+                saved = await asyncio.to_thread(save_generated_image, result.image_bytes, runtime_root)
+            except Exception as exc:
+                self.ctx.logger.error("生图结果保存失败: error_type=%s", type(exc).__name__)
+            if saved is not None:
+                saved_paths.append(saved)
+                sources.append(saved.resolve().as_uri())
+            else:
+                sources.append(f"base64://{base64.b64encode(result.image_bytes).decode('ascii')}")
+        response = format_rightcodes_draw_success(
+            max(results, key=lambda item: item.total_seconds), model=quota.model, image_count=len(results),
+        )
+        if len(results) < len(draw_requests):
+            response += f"\n本次{len(draw_requests)}张中有{len(draw_requests) - len(results)}张生成失败，以下为全部成功结果，未重复生成。"
+        if len(saved_paths) < len(results):
+            response += "\n部分图片未保存到本地，已尝试直接交付，请及时保存。"
         try:
             await self._send_quoted_result(
                 group_id=group_id, user_id=user_id, message_id=_message_id(message),
-                text=response, image_url=source,
+                text=response, image_url="", image_urls=tuple(sources),
             )
             return response
         except Exception as exc:
-            self.ctx.logger.warning("生图发送失败: error_type=%s saved=%s", type(exc).__name__, saved)
-        if saved is None:
+            self.ctx.logger.warning("生图发送失败: error_type=%s saved=%s", type(exc).__name__, saved_paths)
+        if not saved_paths:
             try:
                 await asyncio.shield(asyncio.to_thread(self._refund_locked, runtime_root, quota))
                 response = "图片已生成，但保存和发送均失败，本次积分已退回。"
@@ -520,7 +538,8 @@ class QQBotDrawPlugin(MaiBotPlugin):
                 self.ctx.logger.error("生图积分退款失败: error_type=%s", type(exc).__name__)
                 response = "图片已生成，但保存和发送均失败；积分退款失败，请联系管理员处理。"
         else:
-            response = f"图片已生成并保存，但发送失败。请联系管理员取回：{saved.name}。本次未退积分。"
+            names = "、".join(path.name for path in saved_paths)
+            response = f"图片发送失败，已有{len(saved_paths)}张保存在本地。请联系管理员取回：{names}。本次未退积分。"
         try:
             await self._send_quoted_result(
                 group_id=group_id, user_id=user_id, message_id="", text=response, image_url="",
@@ -657,12 +676,14 @@ class QQBotDrawPlugin(MaiBotPlugin):
         message_id: str,
         text: str,
         image_url: str,
+        image_urls: tuple[str, ...] = (),
     ) -> None:
+        """将本次全部成品放入同一条引用消息，并等待协议端确认发送。"""
         segments: list[dict[str, object]] = []
         if message_id:
             segments.append({"type": "reply", "data": {"id": message_id}})
         segments.append({"type": "text", "data": {"text": text}})
-        if image_url:
+        for image_url in ((image_url,) if image_url else ()) + image_urls:
             if image_url.startswith("data:image/"):
                 image_url = f"base64://{image_url.partition(',')[2]}"
             segments.append(

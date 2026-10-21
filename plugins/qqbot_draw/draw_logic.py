@@ -105,6 +105,21 @@ class RightCodesDrawClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
+    async def draw_batch(
+        self, requests: tuple[RightCodesDrawRequest, ...],
+    ) -> tuple[RightCodesDrawResult | BaseException, ...]:
+        """并行等待单张或四张请求，按输入顺序保留成品及错误；取消时回收全部任务。"""
+        if len(requests) not in (1, 4):
+            raise ValueError("生图批次必须包含一张或四张")
+        tasks = [asyncio.create_task(self.draw(request)) for request in requests]
+        try:
+            return tuple(await asyncio.gather(*tasks, return_exceptions=True))
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def draw(self, request: RightCodesDrawRequest) -> RightCodesDrawResult:
         """生成一张图片；参考图通过 Images edits 上传，返回图片来源和总耗时。"""
         if not self.api_key:
