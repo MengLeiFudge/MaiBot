@@ -6,7 +6,7 @@
 
 DSP knowledge has one physical owner: Yunqi's AstrBot `dsp-major-mods` vector knowledge base. For every Replyer request, this plugin sends the bounded current query and structured group ID to `http://127.0.0.1:8081/v1/knowledge/dsp/search`.
 
-The AstrBot service decides whether the query belongs to DSP. Matching requests use Qwen embedding recall, AstrBot's dense/sparse fusion, and `qwen3-rerank`. Returned evidence is injected into Yelin's existing model request, so Yelin's own chat model still writes the final response. Yelin does not store, update, or embed a second DSP corpus.
+The AstrBot service decides whether the query belongs to DSP. New matching questions use Qwen embedding recall, AstrBot's dense/sparse fusion, and `qwen3-rerank`. Complete greetings, acknowledgements, thanks, and messages without textual content skip paid retrieval. Successful results are shared in an AstrBot-owned memory cache for up to one hour, bounded to 128 queries and invalidated when indexed sources change. Identical concurrent questions reuse one retrieval. Returned evidence is injected into Yelin's existing model request, so Yelin's own chat model still writes the final response. Yelin does not store, update, or embed a second DSP corpus.
 
 The shared corpus covers the authoritative source and structured gameplay data for:
 
