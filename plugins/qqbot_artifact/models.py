@@ -14,6 +14,8 @@ class ArtifactFile:
     sha256: str = ""
     content_sha256: str = ""
     message: str = ""
+    # 空字符串表示群文件根目录，其余值为 QQ 返回的文件夹 ID。
+    folder_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,8 @@ class PublicationState:
     content_sha256: str
     reply_message_id: str = ""
     notice_sent: bool = True
+    # 与群号和文件名共同确定发布状态的归属目录。
+    folder_id: str = ""
 
 
 class ArtifactRequestError(ValueError):

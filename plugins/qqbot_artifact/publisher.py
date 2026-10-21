@@ -45,7 +45,8 @@ class _VerifiedArtifact:
 class _PendingNotice:
     reply_message_id: str = ""
     file_message: str = ""
-    states: list[tuple[str, str]] = field(default_factory=list)
+    # 文件名、内容哈希和目录共同定位待补发通知的状态。
+    states: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 class ArtifactPublisher:
@@ -108,14 +109,31 @@ class ArtifactPublisher:
     ) -> PublishResult:
         result = PublishResult()
         notices: dict[int, _PendingNotice] = {}
+        # 在任何删除、上传前确认本次请求的所有显式文件夹均属于目标群。
+        destinations = {
+            (group, item.artifact.folder_id)
+            for item in verified_artifacts for group in item.artifact.targets if item.artifact.folder_id
+        }
+        for group_id, folder_id in sorted(destinations):
+            root = await self._call(
+                "adapter.napcat.file.get_group_root_files", {"group_id": group_id}, "读取群文件夹"
+            )
+            folders = root.get("folders") if isinstance(root, Mapping) else None
+            if not isinstance(folders, list) or not any(
+                isinstance(folder, Mapping) and _first_text(folder, "folder_id", "id") == folder_id
+                for folder in folders
+            ):
+                raise ArtifactRequestError(f"群 {group_id} 中不存在可访问的文件夹 {folder_id}。")
         for verified in verified_artifacts:
             file_reference = ""
             for group_id in verified.artifact.targets:
-                previous = self._state.load(group_id, verified.artifact.name)
+                folder_id = verified.artifact.folder_id
+                previous = self._state.load(group_id, verified.artifact.name, folder_id=folder_id)
                 if previous is not None and previous.content_sha256 == verified.content_sha256:
                     result.skipped.append(
                         {
                             "group_id": group_id,
+                            "folder_id": folder_id,
                             "name": verified.artifact.name,
                             "sha256": verified.sha256,
                             "content_sha256": verified.content_sha256,
@@ -126,7 +144,7 @@ class ArtifactPublisher:
                         notice = notices.setdefault(group_id, _PendingNotice())
                         notice.reply_message_id = previous.reply_message_id
                         notice.file_message = verified.artifact.message
-                        notice.states.append((verified.artifact.name, verified.content_sha256))
+                        notice.states.append((verified.artifact.name, verified.content_sha256, folder_id))
                     continue
 
                 if not file_reference:
@@ -135,14 +153,19 @@ class ArtifactPublisher:
                         verified.artifact.path,
                         verified.sha256,
                     )
-                deleted_names = await self._delete_same_named_bot_files(group_id, verified.artifact.name)
-                result.deleted.extend({"group_id": group_id, "name": name} for name in deleted_names)
+                deleted_names = await self._delete_same_named_bot_files(
+                    group_id, verified.artifact.name, folder_id=folder_id
+                )
+                result.deleted.extend(
+                    {"group_id": group_id, "folder_id": folder_id, "name": name} for name in deleted_names
+                )
                 upload_payload = await self._call(
                     "adapter.napcat.file.upload_group_file",
                     {
                         "group_id": group_id,
                         "file": file_reference,
                         "name": verified.artifact.name,
+                        **({"folder_id": folder_id} if folder_id else {}),
                     },
                     "上传群文件",
                 )
@@ -163,15 +186,17 @@ class ArtifactPublisher:
                         content_sha256=verified.content_sha256,
                         reply_message_id=reply_message_id,
                         notice_sent=False,
+                        folder_id=folder_id,
                     ),
                 )
                 notice = notices.setdefault(group_id, _PendingNotice())
                 notice.reply_message_id = reply_message_id
                 notice.file_message = verified.artifact.message
-                notice.states.append((verified.artifact.name, verified.content_sha256))
+                notice.states.append((verified.artifact.name, verified.content_sha256, folder_id))
                 result.uploaded.append(
                     {
                         "group_id": group_id,
+                        "folder_id": folder_id,
                         "name": verified.artifact.name,
                         "sha256": verified.sha256,
                         "content_sha256": verified.content_sha256,
@@ -181,15 +206,19 @@ class ArtifactPublisher:
 
         for group_id, notice in notices.items():
             await self._send_notice(group_id, context, notice)
-            for file_name, content_sha256 in notice.states:
-                self._state.mark_notice_sent(group_id, file_name, content_sha256)
+            for file_name, content_sha256, folder_id in notice.states:
+                self._state.mark_notice_sent(group_id, file_name, content_sha256, folder_id=folder_id)
         return result
 
-    async def _delete_same_named_bot_files(self, group_id: int, file_name: str) -> list[str]:
+    async def _delete_same_named_bot_files(
+        self, group_id: int, file_name: str, *, folder_id: str = ""
+    ) -> list[str]:
+        """只清理本次目标目录中由当前机器人上传的同名文件。"""
+        action = "get_group_files_by_folder" if folder_id else "get_group_root_files"
         payload = await self._call(
-            "adapter.napcat.file.get_group_root_files",
-            {"group_id": group_id},
-            "读取群文件列表",
+            "adapter.napcat.file." + action,
+            {"group_id": group_id, **({"folder_id": folder_id} if folder_id else {})},
+            "读取目标目录文件列表",
         )
         deleted: list[str] = []
         for file_info in _extract_group_files(payload):

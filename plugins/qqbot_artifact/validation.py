@@ -114,6 +114,12 @@ def _validate_artifact_file(payload: Any, repo_root: Path, *, max_artifact_bytes
     message = str(payload.get("message") or "").strip()
     if len(message) > 4000:
         raise ArtifactRequestError("Artifact message is too long.")
+    folder_id = payload.get("folder_id", "")
+    if not isinstance(folder_id, str) or len(folder_id) > 256 or any(ord(char) < 32 for char in folder_id):
+        raise ArtifactRequestError("Artifact folder_id must be a QQ folder id string.")
+    folder_id = folder_id.strip()
+    if folder_id == "/":
+        folder_id = ""
     return ArtifactFile(
         path=path,
         name=name,
@@ -121,6 +127,7 @@ def _validate_artifact_file(payload: Any, repo_root: Path, *, max_artifact_bytes
         sha256=expected_sha256,
         content_sha256=content_sha256,
         message=message,
+        folder_id=folder_id,
     )
 
 

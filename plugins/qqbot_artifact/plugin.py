@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
@@ -11,6 +12,7 @@ from qqbot_common.api_results import require_api_result
 from .models import ArtifactRequestError
 from .publisher import ArtifactPublisher, PublisherLimits
 from .validation import normalize_allowed_roots, validate_publish_request
+from .shapez_mods import ShapezModPublisher
 
 
 _PUBLISH_PATH = "/admin/api/artifacts/publish-local"
@@ -90,6 +92,7 @@ class QQBotArtifactPlugin(MaiBotPlugin):
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._publisher: ArtifactPublisher | None = None
+        self._mod_publisher: ShapezModPublisher | None = None
 
     async def on_load(self) -> None:
         await self._start_listener()
@@ -136,10 +139,15 @@ class QQBotArtifactPlugin(MaiBotPlugin):
                 lock_timeout_seconds=self.config.publishing.lock_timeout_seconds,
             ),
         )
+        self._mod_publisher = ShapezModPublisher(self._call_mod_api, account_self_id, runtime_root)
         app = web.Application(client_max_size=self.config.listener.request_max_bytes)
         app["allowed_roots"] = allowed_roots
         app.router.add_get(_HEALTH_PATH, self._health)
         app.router.add_post(_PUBLISH_PATH, self._publish_local)
+        app.router.add_post("/admin/api/artifacts/shapez1-mods", self._sync_shapez_mod)
+        app.router.add_get("/admin/api/artifacts/group-folders", self._group_folders)
+        app.router.add_get("/admin/api/artifacts/group-files", self._group_files)
+        app.router.add_post("/admin/api/artifacts/group-folders", self._group_folders)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, host, self.config.listener.port)
@@ -163,6 +171,7 @@ class QQBotArtifactPlugin(MaiBotPlugin):
         self._site = None
         self._runner = None
         self._publisher = None
+        self._mod_publisher = None
 
     async def _health(self, request: web.Request) -> web.Response:
         if not _is_loopback_request(request):
@@ -174,6 +183,114 @@ class QQBotArtifactPlugin(MaiBotPlugin):
                 "self_id": self.config.listener.account_self_id.strip(),
             }
         )
+
+    async def _sync_shapez_mod(self, request: web.Request) -> web.Response:
+        """在固定目标群文件夹中同步一个已确认模组。"""
+        if not _is_loopback_request(request):
+            return web.json_response({"detail": "Local request required."}, status=403)
+        if self._mod_publisher is None:
+            return web.json_response({"detail": "Mod publisher is unavailable."}, status=503)
+        try:
+            result = await self._mod_publisher.sync(await request.json())
+        except (ValueError, OSError) as exc:
+            return web.json_response({"detail": str(exc)}, status=400)
+        except Exception as exc:
+            self.ctx.logger.warning("一代模组同步失败：%s", type(exc).__name__)
+            return web.json_response({"detail": str(exc)}, status=502)
+        return web.json_response({"ok": True, **result})
+
+    async def _call_mod_api(self, action: str, **params: Any) -> Any:
+        """通过插件 SDK 解包 NapCat 文件调用，协议错误交由模组发布器处理。"""
+        result = await self._call_api("adapter.napcat.file." + action, params=params)
+        return require_api_result(result, "同步一代模组群文件")
+
+    async def _group_files(self, request: web.Request) -> web.Response:
+        """读取指定目录文件元数据，供投递中断后核对实际状态。"""
+        if not _is_loopback_request(request):
+            return web.json_response({"detail": "Local request required."}, status=403)
+        try:
+            group_id = int(request.query.get("group_id", ""))
+            folder_id = request.query.get("folder_id", "").strip()
+            if group_id <= 0 or len(folder_id) > 256 or any(ord(char) < 32 for char in folder_id):
+                raise ValueError
+        except ValueError:
+            return web.json_response({"detail": "Invalid group or folder ID."}, status=400)
+        if folder_id == "/":
+            folder_id = ""
+        try:
+            params = {"group_id": group_id}
+            if folder_id:
+                params["folder_id"] = folder_id
+            action = "get_group_files_by_folder" if folder_id else "get_group_root_files"
+            result = await asyncio.wait_for(self._call_api("adapter.napcat.file." + action, params=params), timeout=30)
+            payload = require_api_result(result, "读取群文件")
+            if isinstance(payload, Mapping) and "data" in payload and ("status" in payload or "retcode" in payload):
+                payload = payload["data"]
+            files = payload.get("files") if isinstance(payload, Mapping) else None
+            if not isinstance(files, list):
+                raise ValueError("OneBot 未返回文件列表")
+            response = [{key: item.get(key) for key in ("file_id", "file_name", "file_size")} for item in files]
+        except Exception as exc:
+            self.ctx.logger.warning("读取群文件失败: error_type=%s", type(exc).__name__)
+            return web.json_response({"detail": "Group file lookup failed."}, status=502)
+        return web.json_response({"group_id": group_id, "folder_id": folder_id, "files": response})
+
+    async def _group_folders(self, request: web.Request) -> web.Response:
+        """供本机读取目录，或显式创建/复用一个指定名称的群文件目录。"""
+        if not _is_loopback_request(request):
+            return web.json_response({"detail": "Local request required."}, status=403)
+        folder_name = None
+        try:
+            if request.method == "POST":
+                body = await request.json()
+                if not isinstance(body, dict):
+                    raise ValueError
+                folder_name = body.get("folder_name")
+                if (not isinstance(folder_name, str) or not folder_name.strip()
+                        or len(folder_name) > 100 or any(ord(char) < 32 for char in folder_name)):
+                    raise ValueError
+                folder_name = folder_name.strip()
+                raw_group_id = body.get("group_id", "")
+            else:
+                raw_group_id = request.query.get("group_id", "")
+            group_id = int(raw_group_id)
+            if group_id <= 0 or isinstance(raw_group_id, bool):
+                raise ValueError
+        except (ValueError, TypeError):
+            return web.json_response({"detail": "Positive group_id and valid folder_name required."}, status=400)
+        try:
+            folders = await self._read_group_folders(group_id)
+            if folder_name is not None:
+                matches = [item for item in folders if item["folder_name"] == folder_name]
+                if not matches:
+                    created = await asyncio.wait_for(self._call_api(
+                        "adapter.napcat.file.create_group_file_folder",
+                        params={"group_id": group_id, "folder_name": folder_name},
+                    ), timeout=30)
+                    require_api_result(created, "创建群文件夹")
+                    folders = await self._read_group_folders(group_id)
+                    matches = [item for item in folders if item["folder_name"] == folder_name]
+                if len(matches) != 1:
+                    return web.json_response({"detail": "Cannot uniquely resolve requested folder."}, status=409)
+                folders = matches
+        except Exception as exc:
+            self.ctx.logger.warning("群文件夹操作失败: error_type=%s", type(exc).__name__)
+            return web.json_response({"detail": "Group folder operation failed; query before retrying."}, status=502)
+        return web.json_response({"group_id": group_id, "folders": folders})
+
+    async def _read_group_folders(self, group_id: int) -> list[dict[str, str]]:
+        """读取必要的目录元数据，不暴露群文件内容。"""
+        result = await asyncio.wait_for(
+            self._call_api("adapter.napcat.file.get_group_root_files", params={"group_id": group_id}),
+            timeout=30,
+        )
+        payload = require_api_result(result, "读取群文件夹")
+        if isinstance(payload, Mapping) and "data" in payload and ("status" in payload or "retcode" in payload):
+            payload = payload["data"]
+        folders = payload.get("folders") if isinstance(payload, Mapping) else None
+        if not isinstance(folders, list):
+            raise ValueError("OneBot 未返回文件夹列表")
+        return [{"folder_id": str(item["folder_id"]), "folder_name": str(item["folder_name"])} for item in folders]
 
     async def _publish_local(self, request: web.Request) -> web.Response:
         if not _is_loopback_request(request):
