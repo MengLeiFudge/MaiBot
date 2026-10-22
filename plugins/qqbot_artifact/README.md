@@ -3,7 +3,8 @@
 MaiBot SDK 2.7 原生扩展插件，为本机白名单构建流程提供兼容接口：
 
 - `GET /healthz`
-- `GET /admin/api/artifacts/group-files?group_id=<群号>&folder_id=<文件夹ID>`：仅供本机核对目标目录的文件 ID、名称及大小，查询上限 30 秒；用于上传超时后核对实际状态，不能把名称/大小相同视为内容哈希确认。
+- `GET /admin/api/artifacts/group-files?group_id=<群号>&folder_id=<文件夹ID>`：读取目标目录的文件 ID、名称及大小，查询上限 30 秒，最多读取 10000 项，达到上限则报错，避免将截断列表当作完整结果。名称/大小相同不等于内容哈希相同。
+- `POST /admin/api/artifacts/group-file-download`：仅接受本机 JSON `{"file_id": "最新目录返回的32位十六进制ID"}`，调用 NapCat 的 `get_file`，通过 QQ 原生文件下载进入本机缓存，不依赖 PacketBackend。成功返回 `file_id` 和 `file_path`；调用方复制到资料目录，并核对目录中的文件大小及本地 SHA-256。只接受目录ID，不接受路径或URL；ID已关联账号可访问的文件及所属会话，不另传群号。下载上限 900 秒，同时受 `publishing.api_timeout_seconds` 限制；客户端应留出额外超时余量。超时先核对缓存，失效ID重新查询列表。缓存路径不写日志，响应禁止缓存。
 - `POST /admin/api/artifacts/publish-local`
 - `POST /admin/api/artifacts/group-folders`：本机 JSON `{"group_id": 319567534, "folder_name": "目标目录"}` 显式创建或复用同名目录，返回该目录 ID 和名称；重名不能唯一匹配则失败。仅在用户指定目录需创建时调用，普通上传不会创建目录。超时或失败先 GET 查询结果，不盲目重试。
 - `GET /admin/api/artifacts/group-folders?group_id=<群号>`：只返回群文件夹的 ID 和名称，不返回文件或成员资料；查询上限 30 秒。

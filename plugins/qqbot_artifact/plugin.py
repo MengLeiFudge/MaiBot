@@ -147,6 +147,7 @@ class QQBotArtifactPlugin(MaiBotPlugin):
         app.router.add_post("/admin/api/artifacts/shapez1-mods", self._sync_shapez_mod)
         app.router.add_get("/admin/api/artifacts/group-folders", self._group_folders)
         app.router.add_get("/admin/api/artifacts/group-files", self._group_files)
+        app.router.add_post("/admin/api/artifacts/group-file-download", self._group_file_download)
         app.router.add_post("/admin/api/artifacts/group-folders", self._group_folders)
         runner = web.AppRunner(app)
         await runner.setup()
@@ -218,7 +219,7 @@ class QQBotArtifactPlugin(MaiBotPlugin):
         if folder_id == "/":
             folder_id = ""
         try:
-            params = {"group_id": group_id}
+            params = {"group_id": group_id, "file_count": 10000}
             if folder_id:
                 params["folder_id"] = folder_id
             action = "get_group_files_by_folder" if folder_id else "get_group_root_files"
@@ -229,11 +230,45 @@ class QQBotArtifactPlugin(MaiBotPlugin):
             files = payload.get("files") if isinstance(payload, Mapping) else None
             if not isinstance(files, list):
                 raise ValueError("OneBot 未返回文件列表")
+            if len(files) >= 10000:
+                return web.json_response({"detail": "Group file listing reached its limit; narrow the folder."}, status=502)
             response = [{key: item.get(key) for key in ("file_id", "file_name", "file_size")} for item in files]
         except Exception as exc:
             self.ctx.logger.warning("读取群文件失败: error_type=%s", type(exc).__name__)
             return web.json_response({"detail": "Group file lookup failed."}, status=502)
         return web.json_response({"group_id": group_id, "folder_id": folder_id, "files": response})
+
+    async def _group_file_download(self, request: web.Request) -> web.Response:
+        """将最新目录中的群文件下载到 NapCat 缓存，返回本机路径。"""
+        if not _is_loopback_request(request):
+            return web.json_response({"detail": "Local request required."}, status=403)
+        try:
+            body = await request.json()
+            file_id = body.get("file_id") if isinstance(body, dict) else None
+            # get_file还接受路径和URL；这里只接受目录返回的临时ID。
+            if not isinstance(file_id, str) or len(file_id) != 32 or any(char not in "0123456789abcdefABCDEF" for char in file_id):
+                raise ValueError
+        except (ValueError, TypeError):
+            return web.json_response({"detail": "A freshly listed 32-character hexadecimal file_id is required."}, status=400)
+        try:
+            result = await asyncio.wait_for(self._call_api(
+                "adapter.napcat.file.get_file", params={"file_id": file_id},
+            ), timeout=900)
+            payload = require_api_result(result, "下载群文件")
+            if isinstance(payload, Mapping) and "data" in payload and ("status" in payload or "retcode" in payload):
+                payload = payload["data"]
+            file_path = payload.get("file") if isinstance(payload, Mapping) else None
+            if not isinstance(file_path, str) or not file_path.strip():
+                raise ValueError("OneBot 未返回本机文件路径")
+        except asyncio.TimeoutError:
+            return web.json_response({"detail": "Group file download timed out; inspect the local cache before retrying."}, status=504)
+        except Exception as exc:
+            self.ctx.logger.warning("下载群文件失败: error_type=%s", type(exc).__name__)
+            return web.json_response({"detail": "Group file download failed; refresh the file list."}, status=502)
+        return web.json_response(
+            {"file_id": file_id, "file_path": file_path},
+            headers={"Cache-Control": "no-store"},
+        )
 
     async def _group_folders(self, request: web.Request) -> web.Response:
         """供本机读取目录，或显式创建/复用一个指定名称的群文件目录。"""
