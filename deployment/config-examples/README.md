@@ -17,6 +17,10 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `scripts/enforce_chat_only.py` 会在 Core 启动前复核并纠正后两项；配置无法解析时会阻止启动。
 
+`bot-identity.example.toml` 的 `[personality].behavior_style` 为 Planner 指定收尾条件：当前需求已完成且没有新的待回应消息时结束，不以 `wait` 轮询普通沉默；必要的信息查询完成后仍可继续回答。`max_consecutive_wait_count = 1` 限制连续定时等待。群聊无动作后的退避从 5 分钟起步，连续无动作上限为 10 分钟；私聊不受空闲退避限制，明确提及和 @ 沿用原生强制触发。Focus 状态按框架规则绕过空闲退避。
+
+框架执行回复等工具后仍会调用一次 Planner 判断下一步；公开请求 Hook 不支持跳过这次调用。收尾提示用于减少后续多余工具调用，实际节省量需从 `data/MaiBot.db` 的 `llm_usage` 和 `maisaka_monitor_events` 对比，不能将提示词视为硬性轮次上限。
+
 `qqbot_visual` 在接收 Hook 中对非定向图片和表情保留已有描述，缺描述时设置 `[图片]`/`[表情包]` 并移除二进制负载，原生组件处理因 content 非空跳过识图及保存。因此普通新图不保证保存在媒体缓存。私聊、群聊当前正文中的昵称/别名、本人 @ 或回复本人时，当前附件沿用原生识图。引用图只补充同会话已有描述，不重新识别。设置 `[visual].planner_mode = "text"`、`replyer_mode = "text"`、`wait_image_recognize_max_time = 15.0`，让文本规划最多等待图片后台描述 15 秒；保持 `emoji.steal_emoji = false`。框架内部对已发图、工具结果图启动的识图任务没有接收 Hook，插件不能拦截。
 
 `qqbot_identity` 向 Planner 注入身份规则，当前 Core 的 Context Items 没有结构化发送者，Planner 身份保持未知；Replyer 按实际目标消息 ID 查询同会话发送者并注入 `platform/user_id/is_owner`。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见两个插件的 README。

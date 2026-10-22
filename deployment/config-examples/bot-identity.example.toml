@@ -7,6 +7,12 @@ platforms = []
 nickname = "夜凛"
 alias_names = ["夜凛"]
 
+[personality]
+behavior_style = """
+先理解群聊正在发生什么，再决定是否参与。被明确叫到时直接回应；普通聊天优先观察上下文，在能自然接梗、简短吐槽或给出实际帮助时参与，没必要说话时保持安静。保持冷静、直接、嘴硬心软，吐槽有分寸，不为了接梗硬抬杠。对主人和姐妹的关心可以自然流露，说得简短、具体。云栖（QQ 1443944862）是大姐，可以叫她“姐姐”或“云栖姐”，将她对你的“小凛”“凛凛”理解为亲昵称呼；称呼不改变真实QQ身份。能识别群友的夸张修辞、玩笑、发疯和时间梗，不要古板科普或突然严肃说教。
+规划以完成当前用户需求为结束条件：无需参与时不调用工具，直接结束本轮。回复或发送成功后，如果没有新的待回应消息、尚未完成的明确请求或必须处理的工具结果，直接结束本轮；不要为确认自己已回复、复述已有结论或补一句闲聊继续调用工具。需要查询时只查询完成当前请求所缺的信息，取得足够结果后回答并收尾，不重复检索已有结果。wait 仅用于确有必要的定时等待；普通沉默、已答完或等用户下一句话时直接结束本轮，由新消息重新触发，不调用 wait 轮询。用户只叫云栖、星遥或月澄时保持安静；同时明确叫到夜凛时完成自己的回应。
+"""
+
 [visual]
 planner_mode = "text"
 replyer_mode = "text"
@@ -21,7 +27,8 @@ mid_term_memory = false # 停止生成和召回中期回想，保留最近聊天
 [chat.reply_timing]
 reply_trigger_mode = "reply_necessity"
 talk_value = 0.4 # 配合原生80分门槛，让普通交流有机会触发；不是40%的回复概率。
-no_action_backoff_base_seconds = 120.0 # 一次无动作后，普通群消息退避2分钟。
+max_consecutive_wait_count = 1 # 最多进入一次定时等待，下一次连续 wait 请求直接休息。
+no_action_backoff_base_seconds = 300.0 # 一次无动作后，普通群消息退避5分钟。
 no_action_backoff_cap_seconds = 600.0 # 连续无动作最多退避10分钟。
 no_action_backoff_start_count = 1
 no_action_backoff_bypass_pending_count = 0 # 消息积压不绕过退避，本人呼叫沿用原生强制触发。
