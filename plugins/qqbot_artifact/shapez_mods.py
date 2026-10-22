@@ -17,7 +17,7 @@ import zipfile
 
 GROUP_ID = 1163635014
 FOLDER_NAME = "s1-MOD-官方模组网站"
-MOD_ROOT = Path("D:/project/shapez/ShapezToolkit/data/shapez1/mods" if os.name == "nt" else "/mnt/d/project/shapez/ShapezToolkit/data/shapez1/mods")
+MOD_ROOT = Path("D:/project/shapez/ShapezToolkit/shapez1_mods/data" if os.name == "nt" else "/mnt/d/project/shapez/ShapezToolkit/shapez1_mods/data")
 
 
 class ShapezModPublisher:
