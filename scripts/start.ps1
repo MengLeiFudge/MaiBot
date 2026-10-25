@@ -19,7 +19,7 @@ $StderrLog = Join-Path $LogDirectory "$InstanceName-launcher.err.log"
 $VenvDirectory = Join-Path $ProjectRoot ".venv"
 $VenvScripts = Join-Path $VenvDirectory "Scripts"
 $PythonExe = Join-Path $VenvScripts "python.exe"
-$PolicyPath = Join-Path $ProjectRoot "scripts\enforce_chat_only.py"
+$PolicyPath = Join-Path $ProjectRoot "scripts\validate_plugin_config.py"
 $BotPath = Join-Path $ProjectRoot "bot.py"
 
 # 独立实例从自己的配置读取端口；缺少环境时只在允许安装时准备依赖。
@@ -167,9 +167,9 @@ try {
     $policyTimer = [System.Diagnostics.Stopwatch]::StartNew()
     & $PythonExe $PolicyPath
     if ($LASTEXITCODE -ne 0) {
-        throw "The $BotLabel plugin allowlist policy failed; MaiBot was not started."
+        throw "The $BotLabel plugin configuration validation failed; MaiBot was not started."
     }
-    Write-Host "$BotLabel plugin allowlist policy passed in $([Math]::Round($policyTimer.Elapsed.TotalSeconds, 1))s."
+    Write-Host "$BotLabel plugin configuration validation passed in $([Math]::Round($policyTimer.Elapsed.TotalSeconds, 1))s."
 
     $processEnvironment = @{}
     foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {

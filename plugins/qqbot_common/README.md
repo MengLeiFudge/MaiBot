@@ -1,6 +1,6 @@
 # QQBot 公共能力
 
-这是拆分式 QQBot -> MaiBot 功能源码的公共插件，不直接提供聊天命令。夜凛最小插件允许策略中本插件必须保持 `plugin.enabled = false`；源码仅为后续与 AstrBot 同步维护固定功能而保留。
+这是拆分式 QQBot -> MaiBot 功能源码的公共插件，不直接提供聊天命令。蓝铃按本机 `plugin.enabled` 独立决定是否启用，不参与云栖与夜凛之间的家族插件同步。
 
 代码提供的内部能力包括：
 
@@ -18,4 +18,4 @@
 - `qqbot.identity.display_name`
 - `qqbot.storage.runtime_root`
 
-启动前的 `scripts/enforce_chat_only.py` 会把本插件和除 `qqbot_poke`、`qqbot_knowledge`、`qqbot_identity`、`qqbot_visual` 外的其他 `qqbot_*` 插件实际配置顶层 `plugin.enabled` 强制改回 `false`。
+蓝铃启动前的 `scripts/validate_plugin_config.py` 只校验本机配置，不改写插件启用状态。夜凛的插件允许策略在 `maibot-yelin/` 中维护。

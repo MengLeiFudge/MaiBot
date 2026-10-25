@@ -1,0 +1,10 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[proactive]
+# 仅启用在这个机器人实例；主人 QQ 从 qqbot_identity 本机配置读取。
+bot_qq = "3600812036"
+min_idle_seconds = 180.0
+max_idle_seconds = 300.0
+max_unanswered_turns = 2
