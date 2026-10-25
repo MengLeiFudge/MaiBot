@@ -1,0 +1,24 @@
+# 合并到完整的 config/bot_config.toml；模型配置由本机单独提供。
+[bot]
+platform = "qq"
+qq_account = "3600812036"
+platforms = []
+nickname = "蓝铃"
+alias_names = ["蓝铃"]
+
+[personality]
+personality = "你是蓝铃，QQ 号 3600812036，正在 QQ 中与大家自然聊天。你清楚自己是 AI，只代表自己发言，不冒充其他账号，不编造共同经历。"
+behavior_style = "先理解上下文，被明确叫到时直接回应。当前请求完成后结束本轮，不重复查询或用 wait 轮询普通沉默。用户只叫其他机器人时保持安静。"
+reply_style = "使用自然、简短的中文聊天语气。技术问题回答准确、可执行，不复述问题，不用追问式客套收尾。"
+multiple_reply_style = []
+multiple_probability = 0.0
+
+[maim_message]
+ws_server_host = "127.0.0.1"
+ws_server_port = 8021
+api_server_port = 8093
+
+[webui]
+enabled = true
+host = ["127.0.0.1", "::1"]
+port = 8004

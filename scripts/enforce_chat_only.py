@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""在 MaiBot 启动前强制应用夜凛最小插件允许策略。"""
+"""在 MaiBot 启动前强制应用聊天实例的最小插件允许策略。"""
 
 from pathlib import Path
 
@@ -91,11 +91,11 @@ def main() -> int:
             corrections.append(target.relative_to(PROJECT_ROOT))
 
     if corrections:
-        print("夜凛插件策略已纠正以下配置：")
+        print("MaiBot 聊天实例插件策略已纠正以下配置：")
         for corrected in corrections:
             print(f"- {corrected.as_posix()}")
     else:
-        print("夜凛插件策略已满足，无需修改。")
+        print("MaiBot 聊天实例插件策略已满足，无需修改。")
     return 0
 
 
@@ -103,5 +103,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (OSError, RuntimeError) as exc:
-        print(f"夜凛插件策略执行失败：{exc}", file=sys.stderr)
+        print(f"MaiBot 聊天实例插件策略执行失败：{exc}", file=sys.stderr)
         sys.exit(1)

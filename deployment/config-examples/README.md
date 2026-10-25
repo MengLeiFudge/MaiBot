@@ -1,8 +1,9 @@
-# 夜凛本机配置参考
+# MaiBot 聊天实例本机配置参考
 
 MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider key 等本机信息，因此不进入 Git。首次部署先按当前稳定版生成完整 `config/bot_config.toml` 和 `config/model_config.toml`，再应用本目录中的固定部署值：
 
 - `bot-identity.example.toml`：夜凛 QQ、显示名和 WebUI 端口。
+- `lanling-identity.example.toml`：蓝铃身份及独立监听端口；应用到独立 `maibot-lanling/` 工作目录。
 - `provider.example.toml`：只展示 provider 字段形状；`api_key` 必须在本机实际配置中填写。
 - `napcat-adapter.example.toml`：合并到 `plugins/napcat_adapter/config.toml`，在适配器入口阻止已知机器人互相触发。
 
@@ -10,12 +11,12 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 启动前还要确认：
 
-- `plugins/napcat_adapter/config.toml` 使用 `127.0.0.1:6201` 和 `connection_id = "yelin"`，并应用 `napcat-adapter.example.toml` 的全局禁止发送者名单。该名单先于私聊/群聊名单开关执行，不依赖业务插件。
+- 夜凛 `plugins/napcat_adapter/config.toml` 使用 `127.0.0.1:6201` 和 `connection_id = "yelin"`；蓝铃使用 `127.0.0.1:6204` 和 `connection_id = "lanling"`。按 `napcat-adapter.example.toml` 配置全局禁止发送者名单，包含另外四个机器人账号。该名单先于私聊/群聊名单开关执行，不依赖业务插件。
 - `plugins/qqbot_poke/config.toml`、`plugins/qqbot_knowledge/config.toml`、`plugins/qqbot_identity/config.toml` 和 `plugins/qqbot_visual/config.toml` 的顶层 `plugin.enabled` 为 `true`。知识插件通过 `127.0.0.1:8081` 使用云栖的共享 DSP 向量检索服务；身份插件在本机 `[identity].owner_qq` 填写真正主人 QQ，示例保持留空。
 - 其余 `plugins/qqbot_*/config.toml` 的顶层 `plugin.enabled` 为 `false`。
 - `src/plugins/built_in/plugin_management/config.toml` 为禁用状态。
 
-`scripts/enforce_chat_only.py` 会在 Core 启动前复核并纠正后两项；配置无法解析时会阻止启动。
+`scripts/enforce_chat_only.py` 会在 Core 启动前复核并纠正后两项；配置无法解析时会阻止启动。`scripts/start.ps1` 通过 `read_startup_config.py` 从本实例完整配置读取名称和 WebUI 端口，PID、日志、数据库与虚拟环境均位于各自工作目录。首次部署蓝铃使用全新 `data/`，不复制其他账号的记忆、登录态或数据库。
 
 `bot-identity.example.toml` 的 `[personality].behavior_style` 为 Planner 指定收尾条件：当前需求已完成且没有新的待回应消息时结束，不以 `wait` 轮询普通沉默；必要的信息查询完成后仍可继续回答。`max_consecutive_wait_count = 1` 限制连续定时等待。群聊无动作后的退避从 5 分钟起步，连续无动作上限为 10 分钟；私聊不受空闲退避限制，明确提及和 @ 沿用原生强制触发。Focus 状态按框架规则绕过空闲退避。
 

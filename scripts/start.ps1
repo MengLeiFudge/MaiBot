@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$ForceRestart,
     [switch]$SkipInstall,
@@ -13,9 +13,43 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $RuntimeDirectory = Join-Path $ProjectRoot ".runtime"
 $PidFile = Join-Path $RuntimeDirectory "maibot.pid"
 $LogDirectory = Join-Path $ProjectRoot "logs"
-$StdoutLog = Join-Path $LogDirectory "yelin-launcher.out.log"
-$StderrLog = Join-Path $LogDirectory "yelin-launcher.err.log"
-$WebUiUrl = "http://127.0.0.1:8003/"
+$InstanceName = (Split-Path -Leaf $ProjectRoot) -replace '^maibot-', ''
+$StdoutLog = Join-Path $LogDirectory "$InstanceName-launcher.out.log"
+$StderrLog = Join-Path $LogDirectory "$InstanceName-launcher.err.log"
+$VenvDirectory = Join-Path $ProjectRoot ".venv"
+$VenvScripts = Join-Path $VenvDirectory "Scripts"
+$PythonExe = Join-Path $VenvScripts "python.exe"
+$PolicyPath = Join-Path $ProjectRoot "scripts\enforce_chat_only.py"
+$BotPath = Join-Path $ProjectRoot "bot.py"
+
+# 独立实例从自己的配置读取端口；缺少环境时只在允许安装时准备依赖。
+if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+    if ($SkipInstall) {
+        throw "The project Python $PythonExe must exist when -SkipInstall is used."
+    }
+    $uv = Get-Command uv -ErrorAction SilentlyContinue
+    if ($null -eq $uv) {
+        throw "uv was not found. Install uv and ensure it is available on PATH."
+    }
+    Push-Location $ProjectRoot
+    try {
+        & $uv.Source sync --frozen
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+            throw "Failed to prepare the MaiBot environment: $PythonExe"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+$startupJson = & $PythonExe (Join-Path $PSScriptRoot "read_startup_config.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to read startup identity and WebUI port from $ProjectRoot\config\bot_config.toml."
+}
+$startup = $startupJson | ConvertFrom-Json
+$BotLabel = [string]$startup.nickname
+$WebUiPort = [int]$startup.webui_port
+$WebUiUrl = "http://127.0.0.1:$WebUiPort/"
 
 function Test-WebUiReady {
     try {
@@ -33,7 +67,7 @@ function Test-WebUiReady {
 #>
 function Test-WebUiPortInUse {
     $listeners = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
-    return $listeners.Port -contains 8003
+    return $listeners.Port -contains $WebUiPort
 }
 
 function Get-OwnedProcess {
@@ -70,7 +104,7 @@ function Wait-WebUiReady {
         }
         Start-Sleep -Seconds 1
     }
-    throw "MaiBot WebUI 8003 did not become ready within $ReadyTimeoutSeconds seconds. Logs: $StdoutLog ; $StderrLog"
+    throw "MaiBot WebUI $WebUiPort did not become ready within $ReadyTimeoutSeconds seconds. Logs: $StdoutLog ; $StderrLog"
 }
 
 $launchTimer = [System.Diagnostics.Stopwatch]::StartNew()
@@ -108,61 +142,34 @@ if ($ForceRestart -and $null -ne $ownedProcess) {
     } while ([DateTime]::UtcNow -lt $releaseDeadline)
 
     if ($null -ne $remainingProcess -or $portInUse) {
-        throw "MaiBot process tree or WebUI port 8003 was not released within 15 seconds."
+        throw "MaiBot process tree or WebUI port $WebUiPort was not released within 15 seconds."
     }
     Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
     $ownedProcess = $null
-    Write-Host "Stopped previous Yelin MaiBot in $([Math]::Round($stopTimer.Elapsed.TotalSeconds, 1))s."
+    Write-Host "Stopped previous $BotLabel MaiBot in $([Math]::Round($stopTimer.Elapsed.TotalSeconds, 1))s."
 }
 
 if ($null -ne $ownedProcess) {
     Wait-WebUiReady
-    Write-Host "Yelin MaiBot is already running. PID: $($ownedProcess.ProcessId). WebUI: $WebUiUrl. Logs: $StdoutLog ; $StderrLog. Elapsed: $([Math]::Round($launchTimer.Elapsed.TotalSeconds, 1))s."
+    Write-Host "$BotLabel MaiBot is already running. PID: $($ownedProcess.ProcessId). WebUI: $WebUiUrl. Logs: $StdoutLog ; $StderrLog. Elapsed: $([Math]::Round($launchTimer.Elapsed.TotalSeconds, 1))s."
     return
 }
 
 if (Test-WebUiPortInUse) {
-    throw "WebUI port 8003 is owned by a process outside this launcher; refusing to take it over."
+    throw "WebUI port $WebUiPort is owned by a process outside this launcher; refusing to take it over."
 }
-
-$VenvDirectory = Join-Path $ProjectRoot ".venv"
-$VenvScripts = Join-Path $VenvDirectory "Scripts"
-$PythonExe = Join-Path $VenvScripts "python.exe"
-$PolicyPath = Join-Path $ProjectRoot "scripts\enforce_chat_only.py"
-$BotPath = Join-Path $ProjectRoot "bot.py"
 
 Push-Location $ProjectRoot
 $startedProcess = $null
 try {
-    if (Test-Path -LiteralPath $PythonExe -PathType Leaf) {
-        Write-Host "Reusing MaiBot environment: $PythonExe"
-    }
-    elseif ($SkipInstall) {
-        throw "The project Python $PythonExe must exist when -SkipInstall is used."
-    }
-    else {
-        $uv = Get-Command uv -ErrorAction SilentlyContinue
-        if ($null -eq $uv) {
-            throw "uv was not found. Install uv and ensure it is available on PATH."
-        }
-
-        $installTimer = [System.Diagnostics.Stopwatch]::StartNew()
-        & $uv.Source sync --frozen
-        if ($LASTEXITCODE -ne 0) {
-            throw "uv sync --frozen failed."
-        }
-        if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
-            throw "uv sync completed but project Python was not created at $PythonExe."
-        }
-        Write-Host "Prepared MaiBot environment in $([Math]::Round($installTimer.Elapsed.TotalSeconds, 1))s."
-    }
+    Write-Host "Reusing MaiBot environment: $PythonExe"
 
     $policyTimer = [System.Diagnostics.Stopwatch]::StartNew()
     & $PythonExe $PolicyPath
     if ($LASTEXITCODE -ne 0) {
-        throw "The Yelin plugin allowlist policy failed; MaiBot was not started."
+        throw "The $BotLabel plugin allowlist policy failed; MaiBot was not started."
     }
-    Write-Host "Yelin plugin allowlist policy passed in $([Math]::Round($policyTimer.Elapsed.TotalSeconds, 1))s."
+    Write-Host "$BotLabel plugin allowlist policy passed in $([Math]::Round($policyTimer.Elapsed.TotalSeconds, 1))s."
 
     $processEnvironment = @{}
     foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {
@@ -198,9 +205,9 @@ try {
         throw "MaiBot background process $($createResult.ProcessId) exited before it could be observed. Logs: $StdoutLog ; $StderrLog"
     }
 
-    Write-Host "Started Yelin MaiBot background root. PID: $($createResult.ProcessId). Waiting for WebUI..."
+    Write-Host "Started $BotLabel MaiBot background root. PID: $($createResult.ProcessId). Waiting for WebUI..."
     Wait-WebUiReady -StartedProcess $startedProcess
-    Write-Host "Yelin MaiBot is ready. PID: $($createResult.ProcessId). WebUI: $WebUiUrl. Logs: $StdoutLog ; $StderrLog. Elapsed: $([Math]::Round($launchTimer.Elapsed.TotalSeconds, 1))s."
+    Write-Host "$BotLabel MaiBot is ready. PID: $($createResult.ProcessId). WebUI: $WebUiUrl. Logs: $StdoutLog ; $StderrLog. Elapsed: $([Math]::Round($launchTimer.Elapsed.TotalSeconds, 1))s."
 }
 catch {
     if (Test-Path -LiteralPath $PidFile) {
