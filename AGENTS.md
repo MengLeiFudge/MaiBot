@@ -96,6 +96,6 @@ https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md
 
 本 fork 的行为修改遵守 QQBot 根 AGENTS 的框架核心边界，只使用本地插件、公开 SDK/Hook 与现有配置，不修改 Core、内置模块或已安装框架包。部署插件直接随本 fork 的 plugins/ 源码跟踪，不创建嵌套插件仓库。
 
-夜凛与蓝铃使用独立工作目录、配置、虚拟环境和数据。启动身份与端口来自各自 config/bot_config.toml，示例见 deployment/config-examples/README.md。两个实例允许启用 napcat_adapter、qqbot_poke、qqbot_knowledge、qqbot_identity、qqbot_visual；其余 qqbot_* 实际与示例配置的顶层 plugin.enabled 必须为 false，聊天插件管理保持禁用。每次 Core 启动前执行 scripts/enforce_chat_only.py，解析或禁用确认失败时停止启动。
+夜凛属于棉花糖家族，目前与云栖同步固定功能插件源码，运行时仅启用聊天辅助插件；蓝铃是独立 bot，不参与家族插件同步，也不套用本实例的插件允许列表。启动身份与端口来自本项目 config/bot_config.toml，示例见 deployment/config-examples/README.md。夜凛允许启用 napcat_adapter、qqbot_poke、qqbot_knowledge、qqbot_identity、qqbot_visual；其余 qqbot_* 实际与示例配置的顶层 plugin.enabled 必须为 false，聊天插件管理保持禁用。每次 Core 启动前执行 scripts/enforce_chat_only.py，解析或禁用确认失败时停止启动。
 
 本地运行配置和主人的真实 QQ 不进 Git；qqbot_identity 的 owner_qq 只填入本机插件 config.toml，示例留空。定向看图与身份的公开 Hook 限制见对应插件 README 和 deployment/config-examples/README.md。
