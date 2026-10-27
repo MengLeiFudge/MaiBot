@@ -7,4 +7,7 @@ config_version = "0.1.0"
 bot_qq = "3600812036"
 min_idle_seconds = 180.0
 max_idle_seconds = 300.0
+# 实际发出两轮而无人回应后，之后每轮使用 2–3 小时长间隔。
 max_unanswered_turns = 2
+min_retry_seconds = 7200.0
+max_retry_seconds = 10800.0
