@@ -12,4 +12,6 @@
 
 Planner 和待回复私聊的 Replyer 都追加联网工具说明：`tool_search` 查找的是本地延迟加载工具，服务端原生 `web_search` 不在这个列表中。明确要求搜索时使用本次请求实际提供的原生搜索工具，不因本地工具发现为空就声称不能联网。插件本身不提供搜索服务、不强制每轮联网；是否实际调用仍由模型决定，失败应如实表达。
 
-使用公开 `maisaka.planner.before_request` / `after_response`、`maisaka.replyer.before_request` Hook、Context Item schema 1，以及配置、聊天流、最近消息查询和 `llm.generate_with_tools` 能力。插件没有直接发送消息的权限，不修改用户配置中的提示词，不持久化聊天内容，不注册后台调度。日志仅记录核对开始、保留结果、丢弃过期结果、补齐调用及错误类型。
+本轮主人消息含普通引用时，通过 `message.get_by_id` 读取同会话的原文，最多展开三个引用、每条 2000 字，不递归、不请求二进制媒体。原文、发送者角色、原消息时间及截断状态作为历史资料分别进入 Planner 和 Replyer，避免只看到 ID 后误用合并转发工具。没有取得原文则明确标记缺失。记忆规则区分检索被过滤、失败和无结果，要求不凭空补写共同经历；最终表达仍取决于模型。
+
+使用公开 `maisaka.planner.before_request` / `after_response`、`maisaka.replyer.before_request` Hook、Context Item schema 1，以及配置、聊天流、消息查询和 `llm.generate_with_tools` 能力。插件没有直接发送消息的权限，不修改用户配置中的提示词，不持久化聊天内容，不注册后台调度。日志仅记录核对开始、保留结果、丢弃过期结果、补齐调用及错误类型。

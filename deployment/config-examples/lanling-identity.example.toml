@@ -22,3 +22,18 @@ api_server_port = 8093
 enabled = true
 host = ["127.0.0.1", "::1"]
 port = 8004
+
+# 所有会话可在自己的范围读写记忆，不开启跨会话共享。
+[a_memorix]
+global_memory_sharing_enabled = false
+
+[a_memorix.filter]
+enabled = false
+
+[a_memorix.integration]
+chat_summary_writeback_enabled = true
+chat_summary_writeback_message_threshold = 36
+chat_summary_writeback_context_length = 36
+heuristic_memory_cross_chat_enabled = false
+heuristic_memory_group_to_private_enabled = false
+heuristic_memory_private_to_group_enabled = false
