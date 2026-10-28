@@ -14,6 +14,16 @@ from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugi
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 
+PRIVATE_MESSAGE_SETTLE_SECONDS = 2.0
+SEARCH_RULE = (
+    "[联网工具规则]tool_search 只查找本地延迟加载的函数工具，不搜索网页。"
+    "Responses 服务端原生 web_search 不属于该列表；不能因 tool_search 没找到就说无法联网。"
+    "如果本次请求提供 web_search，遇到对方明确要求搜索或需要核实的最新信息，"
+    "应直接使用原生 web_search，依据实际检索结果回答。普通闲聊无需搜索。"
+    "搜索确实失败时说明这次查询失败；没有实际查询时不要声称已搜索。[/联网工具规则]"
+)
+
+
 class PluginSection(PluginConfigBase):
     """私聊回复执行检查的启用状态。"""
 
@@ -58,6 +68,7 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         self._active = True
         self._pending: PendingReply | None = None
         self._retried_message_id = ""
+        self._settled_message_id = ""
         self.ctx.logger.info("私聊回复执行检查已加载，启用=%s", cast(GuardConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
@@ -113,7 +124,7 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         description="为待回复主人私聊补充工具执行规则并记录本轮目标",
         mode=HookMode.BLOCKING,
         order=HookOrder.LATE,
-        timeout_ms=5000,
+        timeout_ms=9000,
         error_policy=ErrorPolicy.SKIP,
     )
     async def prepare_reply(
@@ -155,6 +166,14 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
                 break
         if reply_tool is None:
             return {"action": "continue"}
+        if self._settled_message_id != message_id:
+            # 本轮已绑定原生 Planner 中断标记。留出连发窗口；新消息到来后
+            # 由原生中断流程重新收集上下文，不把未进入本轮的消息拼入旧请求。
+            self._settled_message_id = message_id
+            await asyncio.sleep(PRIVATE_MESSAGE_SETTLE_SECONDS)
+            async with asyncio.timeout(3):
+                if await self._pending_message_id(session_id) != message_id:
+                    return {"action": "continue"}
         self._pending = PendingReply(session_id, message_id, reply_tool)
         rule = {
             "item_type": "SystemMessageItem",
@@ -162,13 +181,37 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
             "parts": [{"type": "text", "text": (
                 "[私聊执行规则]分析文字不会发送给对方。决定回应当前消息时，必须实际调用 reply；"
                 "写下准备回复、直接回答、无需查询工具等分析不等于已经发言。"
-                "reply 本身也是工具，与信息查询工具不同。明确决定保持安静时才可以不调用工具结束。"
-                "已完成的回复不要重复执行。[/私聊执行规则]"
+                "reply 本身也是工具，与信息查询工具不同。决定等待或保持安静时，不调用 reply，也不补发回复。"
+                "将对方连续发来的消息作为同一轮表达一起理解，结合最新补充再决定是否和何时回应。"
+                "不必逐条回答，不要对已经被后续消息修正的旧片段单独作答。"
+                "对方还在补充、只有简单应声或没有新内容时，可以等待或保持安静。"
+                "已完成的回复不要重复执行。[/私聊执行规则]" + SEARCH_RULE
             )}],
         }
         return {"action": "continue", "modified_kwargs": {
             **kwargs, "session_id": session_id, "items": [*items, rule],
             "tool_definitions": tool_definitions, "item_schema_version": item_schema_version,
+        }}
+
+    @HookHandler(
+        "maisaka.replyer.before_request",
+        name="qqbot_reply_guard_search_context",
+        description="向主人私聊回复器说明原生联网搜索与本地工具发现的区别",
+        mode=HookMode.BLOCKING,
+        order=HookOrder.LATE,
+        timeout_ms=5000,
+        error_policy=ErrorPolicy.SKIP,
+    )
+    async def prepare_search_context(
+        self, session_id: str = "", extra_prompt: str = "", **kwargs: Any,
+    ) -> dict[str, object]:
+        """保留回复器原有参数，只给尚未回应的主人私聊追加工具能力说明。"""
+        async with asyncio.timeout(3):
+            if not await self._pending_message_id(session_id):
+                return {"action": "continue"}
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "session_id": session_id,
+            "extra_prompt": "\n".join(part for part in (extra_prompt, SEARCH_RULE) if part),
         }}
 
     @HookHandler(

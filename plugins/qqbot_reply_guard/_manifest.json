@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-reply-guard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "name": "QQBot 私聊回复执行检查",
-  "description": "核对主人私聊规划遗漏的 reply 调用，通过原生回复流程执行已决定的回应。",
+  "description": "为主人私聊保留连发合并窗口、说明原生搜索能力，并核对已决定回应时遗漏的 reply 调用。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {
