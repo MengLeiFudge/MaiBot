@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-visual",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "name": "QQBot 定向看图",
-  "description": "通过公开入站 Hook 屏蔽非定向媒体的自动识图，定向附件沿用原生图片处理。",
+  "description": "通过公开入站 Hook 门控非定向图片，并按收集开关放行聊天表情进入原生本地图库。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {

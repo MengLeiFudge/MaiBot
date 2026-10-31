@@ -19,7 +19,7 @@ replyer_mode = "text"
 wait_image_recognize_max_time = 15.0 # 文本规划最多等后台图片描述 15 秒；不改变识图任务自身超时。
 
 [emoji]
-steal_emoji = false
+steal_emoji = true
 
 [chat]
 mid_term_memory = false # 停止生成和召回中期回想，保留最近聊天上下文。
