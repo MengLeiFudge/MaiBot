@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import asyncio
@@ -10,10 +11,13 @@ from maibot_sdk import ON_BOT_CONFIG_RELOAD, Field, HookHandler, MaiBotPlugin, P
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 
+from .video_context import enrich_video_message
+from .video_reader import VideoReader
+
 class PluginSection(PluginConfigBase):
     """入站图片门控的启用与配置版本。"""
 
-    enabled: bool = Field(default=True, description="是否启用图片门控与表情收集放行")
+    enabled: bool = Field(default=True, description="是否启用图片门控、表情收集放行与视频分镜")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -21,6 +25,7 @@ class VisualConfig(PluginConfigBase):
     """本人身份和称呼复用 bot 配置，不复制到插件配置。"""
 
     plugin: PluginSection = Field(default_factory=PluginSection)
+    video_enabled: bool = Field(default=True, description="下载当前视频链接并用分镜图理解内容")
 
 
 def _mask_media(segments: list[Any], *, collect_emoji: bool = False) -> bool:
@@ -55,11 +60,12 @@ class QQBotVisualPlugin(MaiBotPlugin):
     config_reload_subscriptions: ClassVar[tuple[str, ...]] = (ON_BOT_CONFIG_RELOAD,)
 
     def __init__(self) -> None:
-        """保存当前 bot 的身份和表情收集开关，不缓存消息或图像。"""
+        """保存身份与收集开关，视频读取器在加载时创建。"""
         super().__init__()
         self._bot_id = ""
         self._names: tuple[str, ...] = ()
         self._collect_emoji = False
+        self._video_reader: VideoReader | None = None
 
     async def _reload_bot_config(self) -> None:
         """通过公开 config.get 读取身份和收集开关，校验后一起替换。"""
@@ -82,12 +88,17 @@ class QQBotVisualPlugin(MaiBotPlugin):
         self._collect_emoji = collect_emoji
 
     async def on_load(self) -> None:
-        """读取原生身份配置，加载阶段不识图。"""
+        """读取身份配置并创建视频读取器，加载阶段不处理媒体。"""
         await self._reload_bot_config()
+        self._video_reader = VideoReader(Path(self.ctx.paths.data_dir) / "videos")
+        self.ctx.logger.info("视频分镜已加载：enabled=%s tools_ready=%s", cast(VisualConfig, self.config).video_enabled, self._video_reader.tools_ready)
         self.ctx.logger.info("QQBot 定向看图已加载，表情收集=%s；引用图片仅复用已有描述", self._collect_emoji)
 
     async def on_unload(self) -> None:
-        """清空配置副本；无后台任务或媒体缓存需要释放。"""
+        """等待视频任务取消并清空配置副本。"""
+        if self._video_reader is not None:
+            await self._video_reader.close()
+            self._video_reader = None
         self._bot_id = ""
         self._names = ()
         self._collect_emoji = False
@@ -98,6 +109,27 @@ class QQBotVisualPlugin(MaiBotPlugin):
         if scope == ON_BOT_CONFIG_RELOAD:
             await self._reload_bot_config()
             self.ctx.logger.info("QQBot 定向看图配置已更新: version=%s", version)
+
+    @HookHandler(
+        "chat.receive.before_process", name="qqbot_visual_video",
+        description="下载视频链接或附件并追加分镜画面描述",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=110000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def read_video(self, message: object = None, **kwargs: Any) -> dict[str, object]:
+        """只处理本次消息的视频，保持聊天触发和既有图像门控。"""
+        reader = self._video_reader
+        if not cast(VisualConfig, self.config).plugin.enabled or not cast(VisualConfig, self.config).video_enabled or reader is None:
+            return {"action": "continue"}
+        if not isinstance(message, dict) or message.get("platform") != "qq" or message.get("is_notify") is True:
+            return {"action": "continue"}
+        info = message.get("message_info")
+        sender = info.get("user_info") if isinstance(info, Mapping) else None
+        if isinstance(sender, Mapping) and str(sender.get("user_id")) == self._bot_id:
+            return {"action": "continue"}
+        modified = await enrich_video_message(self.ctx, reader, cast(dict[str, Any], message))
+        if modified is None:
+            return {"action": "continue"}
+        return {"action": "continue", "modified_kwargs": {**kwargs, "message": modified}}
 
     def _is_directed(self, message: Mapping[str, Any]) -> bool:
         """只读取当前顶层正文及结构化 @/回复，不用转发内容触发识图。"""

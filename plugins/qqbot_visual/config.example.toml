@@ -1,3 +1,5 @@
+video_enabled = true
+
 [plugin]
 enabled = true
 config_version = "0.1.0"

@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-visual",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "name": "QQBot 定向看图",
-  "description": "通过公开入站 Hook 门控非定向图片，并按收集开关放行聊天表情进入原生本地图库。",
+  "description": "门控群聊图片、放行本地表情收集，并下载视频链接或附件生成分镜描述。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {
@@ -13,8 +13,13 @@
   },
   "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
   "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
-  "dependencies": [],
-  "capabilities": ["config.get", "message.get_by_id"],
+  "dependencies": [
+    {"type": "python_package", "name": "Pillow", "version_spec": ">=11.3,<13"},
+    {"type": "python_package", "name": "aiohttp", "version_spec": ">=3.8"},
+    {"type": "python_package", "name": "yt-dlp", "version_spec": ">=2025.10.14"},
+    {"type": "python_package", "name": "ffmpeg-binaries", "version_spec": "==1.1.0"}
+  ],
+  "capabilities": ["config.get", "message.get_by_id", "llm.generate"],
   "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
   "plugin_type": "extension"
 }
