@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any, Callable, Dict, Mapping, Optional, Protocol
 
 import asyncio
@@ -11,6 +12,7 @@ from ..config import NapCatPluginSettings
 from ..types import NapCatPayloadDict
 from .bundle import NapCatRuntimeBundle
 
+MAX_APPROVED_REQUESTS = 1024
 
 class _GatewayCapabilityProtocol(Protocol):
     """插件网关能力协议。"""
@@ -51,6 +53,8 @@ class NapCatEventRouter:
         self._gateway_name = gateway_name
         self._load_settings = load_settings
         self._runtime: Optional[NapCatRuntimeBundle] = None
+        self._request_lock = asyncio.Lock()
+        self._approved_requests: OrderedDict[str, None] = OrderedDict()
 
     def bind_runtime(self, runtime: NapCatRuntimeBundle) -> None:
         """绑定当前路由器使用的运行时依赖。
@@ -61,7 +65,8 @@ class NapCatEventRouter:
         self._runtime = runtime
 
     def reset_caches(self) -> None:
-        """重置与路由相关的短期缓存。"""
+        """重置与路由和协议申请去重相关的短期缓存。"""
+        self._approved_requests.clear()
         runtime = self._runtime
         if runtime is None:
             return
@@ -210,10 +215,10 @@ class NapCatEventRouter:
             self._logger.debug(f"Host 丢弃了 NapCat 通知事件: {external_message_id or dedupe_key or '无消息 ID'}")
 
     async def handle_request_event(self, payload: NapCatPayloadDict) -> None:
-        """处理 NapCat ``request`` 事件并注入 Host。
+        """自动同意好友和群请求，并在接入层消费所有协议申请。
 
-        请求属于协议管理事件，不经过普通聊天名单、官方机器人或文本过滤。
-        完整载荷仅保存在消息的 ``additional_config`` 中供业务 Hook 消费。
+        请求不受普通聊天名单限制，也不注入 Host，避免业务插件停用后
+        将申请送进聊天与记忆。最近成功的申请在当前连接内有界去重。
 
         Args:
             payload: NapCat 推送的 OneBot 请求事件。
@@ -225,24 +230,49 @@ class NapCatEventRouter:
         if self_id:
             await runtime.runtime_state.report_connected(self_id, settings.napcat_server)
 
-        message_dict = await runtime.request_codec.build_request_message_dict(payload)
-        if message_dict is None:
-            self._logger.debug("NapCat 请求事件缺少 request_type，已丢弃")
+        request_type = str(payload.get("request_type") or "").strip()
+        sub_type = str(payload.get("sub_type") or "").strip()
+        if request_type == "friend":
+            action = "set_friend_add_request"
+        elif request_type == "group" and sub_type in {"add", "invite"}:
+            action = "set_group_add_request"
+        else:
+            self._logger.debug(f"NapCat 未支持的请求事件已消费: {request_type}.{sub_type}")
             return
 
-        request_type = str(payload.get("request_type") or "").strip()
-        request_sub_type = str(payload.get("sub_type") or "").strip()
-        dedupe_key = runtime.request_codec.build_request_dedupe_key(payload) or ""
-        accepted = await self._gateway_capability.route_message(
-            gateway_name=self._gateway_name,
-            message=message_dict,
-            route_metadata=self._build_route_metadata(self_id, settings.napcat_server.connection_id),
-            external_message_id="",
-            dedupe_key=dedupe_key,
-        )
-        if not accepted:
-            event_name = f"{request_type}.{request_sub_type}" if request_sub_type else request_type
-            self._logger.debug(f"Host 丢弃了 NapCat 请求事件: {event_name}")
+        flag = str(payload.get("flag") or "").strip()
+        if not flag:
+            self._logger.warning(f"NapCat 请求缺少 flag，无法自动同意: {request_type}.{sub_type}")
+            return
+
+        params: Dict[str, Any] = {"flag": flag, "approve": True}
+        if request_type == "group":
+            params["sub_type"] = sub_type
+        key = runtime.request_codec.build_request_dedupe_key(payload) or ""
+        async with self._request_lock:
+            if key in self._approved_requests:
+                return
+            try:
+                await runtime.action_service.call_action(action, params)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # 失败不记为已处理；后续再次上报时仍可同意，申请始终不进入聊天。
+                self._logger.warning(
+                    f"NapCat 自动同意请求失败: action={action} self_id={self_id} error={exc}"
+                )
+                return
+
+            self._approved_requests[key] = None
+            # 只保留最近的成功申请，限制长连接占用的去重缓存。
+            if len(self._approved_requests) > MAX_APPROVED_REQUESTS:
+                self._approved_requests.popitem(last=False)
+            user_id = str(payload.get("user_id") or "").strip()
+            group_id = str(payload.get("group_id") or "").strip()
+            self._logger.info(
+                f"NapCat 已自动同意请求: action={action} self_id={self_id} "
+                f"user_id={user_id} group_id={group_id} sub_type={sub_type}"
+            )
 
     async def emit_natural_lift_notice(self, payload: NapCatPayloadDict) -> None:
         """注入一条由适配器合成的自然解除禁言通知。
