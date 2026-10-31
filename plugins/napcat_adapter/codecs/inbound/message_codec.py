@@ -482,6 +482,9 @@ class NapCatInboundCodec(NapCatInboundCardMixin, NapCatInboundTextMixin):
             parts.append(f"文件: {file_name}")
         if file_size:
             parts.append(f"大小: {file_size}")
+        media_url = str(segment_data.get("url") or "").strip()
+        if media_url:
+            parts.append(f"链接: {media_url}")
         if parts:
             return self._build_text_segment(f"[视频] {'，'.join(parts)}")
         return self._build_text_segment("[视频]")
