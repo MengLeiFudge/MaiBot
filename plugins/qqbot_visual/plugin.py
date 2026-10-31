@@ -9,6 +9,7 @@ import asyncio
 from maibot_sdk import ON_BOT_CONFIG_RELOAD, Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
+from .private_media import PrivateMediaContext
 
 class PluginSection(PluginConfigBase):
     """入站图片门控的启用与配置版本。"""
@@ -53,10 +54,11 @@ class QQBotVisualPlugin(MaiBotPlugin):
     config_reload_subscriptions: ClassVar[tuple[str, ...]] = (ON_BOT_CONFIG_RELOAD,)
 
     def __init__(self) -> None:
-        """只保存当前 bot 配置的本人账号和称呼，不缓存消息或图像。"""
+        """初始化本人身份；媒体缓存由加载回调创建、卸载回调释放。"""
         super().__init__()
         self._bot_id = ""
         self._names: tuple[str, ...] = ()
+        self._private_media: PrivateMediaContext | None = None
 
     async def _reload_bot_identity(self) -> None:
         """通过公开 config.get 读取本人身份，完整校验后一起替换。"""
@@ -77,10 +79,14 @@ class QQBotVisualPlugin(MaiBotPlugin):
     async def on_load(self) -> None:
         """读取原生身份配置，加载阶段不识图。"""
         await self._reload_bot_identity()
-        self.ctx.logger.info("QQBot 定向看图已加载，昵称和别名来自 bot 配置；引用图片仅复用已有描述")
+        self._private_media = PrivateMediaContext(self.ctx)
+        self.ctx.logger.info("QQBot 定向看图已加载；私聊在 Planner 和 Replyer 请求前补充图片及表情原图")
 
     async def on_unload(self) -> None:
-        """清空配置副本；无后台任务或媒体缓存需要释放。"""
+        """清空身份和有界媒体缓存；没有后台识别任务。"""
+        if self._private_media is not None:
+            self._private_media.clear()
+            self._private_media = None
         self._bot_id = ""
         self._names = ()
 
@@ -194,6 +200,46 @@ class QQBotVisualPlugin(MaiBotPlugin):
         if not changed:
             return {"action": "continue"}
         return {"action": "continue", "modified_kwargs": {**kwargs, "message": modified}}
+
+    async def _attach_private_media(
+        self, session_id: str, items: object, item_schema_version: int, kwargs: dict[str, Any],
+    ) -> dict[str, object]:
+        """两个模型请求共用同一媒体读取链，不调用额外识别模型。"""
+        media = self._private_media
+        if (not cast(VisualConfig, self.config).plugin.enabled or media is None
+                or not session_id or item_schema_version != 1 or not isinstance(items, list)):
+            return {"action": "continue"}
+        async with asyncio.timeout(10):
+            enriched = await media.enrich(session_id, items)
+        if self._private_media is not media or enriched == items:
+            return {"action": "continue"}
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "session_id": session_id, "items": enriched, "item_schema_version": item_schema_version,
+        }}
+
+    @HookHandler(
+        "maisaka.planner.before_request", name="qqbot_visual_private_planner",
+        description="把同会话私聊图片和表情原图补入规划请求",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=12000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def prepare_private_planner(
+        self, session_id: str = "", items: object = None, item_schema_version: int = 0, **kwargs: Any,
+    ) -> dict[str, object]:
+        """私聊规划直接观察附件；群聊仍沿用原来的定向识图策略。"""
+        return await self._attach_private_media(session_id, items, item_schema_version, kwargs)
+
+    @HookHandler(
+        "maisaka.replyer.before_model_request", name="qqbot_visual_private_replyer",
+        description="把同会话私聊图片和表情原图补入回复模型请求",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=12000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def prepare_private_replyer(
+        self, session_id: str = "", items: object = None, item_schema_version: int = 0, **kwargs: Any,
+    ) -> dict[str, object]:
+        """回复器独立取得附件，不依赖规划器把视觉细节转述进摘要。"""
+        if kwargs.get("selected_model_visual") is not True:
+            return {"action": "continue"}
+        return await self._attach_private_media(session_id, items, item_schema_version, kwargs)
 
 
 def create_plugin() -> MaiBotPlugin:

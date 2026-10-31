@@ -22,7 +22,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 框架执行回复等工具后仍会调用一次 Planner 判断下一步；公开请求 Hook 不支持跳过这次调用。收尾提示用于减少后续多余工具调用，实际节省量需从 `data/MaiBot.db` 的 `llm_usage` 和 `maisaka_monitor_events` 对比，不能将提示词视为硬性轮次上限。
 
-`qqbot_visual` 在接收 Hook 中对非定向图片和表情保留已有描述，缺描述时设置 `[图片]`/`[表情包]` 并移除二进制负载，原生组件处理因 content 非空跳过识图及保存。因此普通新图不保证保存在媒体缓存。私聊、群聊当前正文中的昵称/别名、本人 @ 或回复本人时，当前附件沿用原生识图。引用图只补充同会话已有描述，不重新识别。设置 `[visual].planner_mode = "text"`、`replyer_mode = "text"`、`wait_image_recognize_max_time = 15.0`，让文本规划最多等待图片后台描述 15 秒；保持 `emoji.steal_emoji = false`。框架内部对已发图、工具结果图启动的识图任务没有接收 Hook，插件不能拦截。
+`qqbot_visual` 在接收 Hook 中对非定向图片和表情保留已有描述，缺描述时设置 `[图片]`/`[表情包]` 并移除二进制负载，原生组件处理因 content 非空跳过识图及保存。因此普通新群图不保证保存在媒体缓存。定向附件沿用原生识图；接收阶段的引用只补充同会话已有描述。蓝铃私聊另在 Planner 和 Replyer 请求 Hook 中直接补入同会话图片及表情图像，动态表情抽取代表帧，也支持普通引用中的原图，详见 [qqbot_visual](../../plugins/qqbot_visual/README.md)。保持 `[visual].planner_mode = "text"`、`replyer_mode = "text"`、`wait_image_recognize_max_time = 15.0` 和 `emoji.steal_emoji = false`；仅蓝铃私聊通过插件补图，群聊仍走原有策略。框架内部对已发图、工具结果图启动的识图任务没有接收 Hook，插件不能拦截。
 
 蓝铃的私聊主动续聊配置见 [qqbot_proactive](../../plugins/qqbot_proactive/README.md)。主人身份复用本机身份插件配置，主动次数状态保存在该插件的标准数据目录。
 
