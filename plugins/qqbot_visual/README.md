@@ -2,11 +2,11 @@
 
 `qqbot_visual` 使用 MaiBot 1.2.3 的公开 SDK/Hook：接收阶段门控群聊媒体，私聊在 Planner 和 Replyer 请求前补充图像。不修改框架，不直接调用额外视觉模型。
 
-将 `config.example.toml` 复制为本机 `config.toml` 并启用。本人 QQ、昵称和别名通过 `config.get` 读取 `bot.qq_account/nickname/alias_names`，跟随 `bot` 配置热重载。定向消息包括私聊、群聊中的本人真实 @、适配器 `at_bot`、回复本人，以及当前顶层正文含昵称或别名；机器人自己的发言排除。转发、引用正文和图片描述中的名字不参与呼叫判定。
+将 `config.example.toml` 复制为本机 `config.toml` 并启用。本人 QQ、昵称、别名和表情收集开关通过 `config.get` 读取 `bot.qq_account/nickname/alias_names` 与 `emoji.steal_emoji`，跟随 bot 配置热重载。定向消息包括私聊、群聊中的本人真实 @、适配器 `at_bot`、回复本人，以及当前顶层正文含昵称或别名；机器人自己的发言排除。转发、引用正文和图片描述中的名字不参与呼叫判定。
 
-非定向图片和表情保留已有描述，缺描述时写 `[图片]`/`[表情包]`，移除 `binary_data_base64`，保留组件 hash 和其余路由、发送者、时间及文本。转发中的媒体递归处理。原生组件遇到非空 content 会跳过 VLM 和保存，因此普通新群图不保证进入媒体文件缓存。
+非定向普通图片保留已有描述，缺描述时写 `[图片]`，移除 `binary_data_base64`，保留组件 hash 和其余路由、发送者、时间及文本。转发中的媒体递归处理。原生组件遇到非空 content 会跳过 VLM 和保存，因此普通新群图不保证进入媒体文件缓存。设置 `emoji.steal_emoji = true` 后，表情组件保留原始数据与二进制，进入原生表情描述、缓存和本地注册链；关闭该开关时，非定向表情沿用占位策略。注册数量、检查间隔、单图大小和替换规则沿用 `[emoji]` 配置。
 
-蓝铃保持 `[visual].planner_mode = "text"`、`replyer_mode = "text"`，以保留群聊的文字识图策略；私聊通过请求 Hook 单独补充图像。`wait_image_recognize_max_time = 15.0` 仍用于原生图片描述等待，不是整个识图任务的超时。保持 `emoji.steal_emoji = false`，关闭自动收集表情。
+蓝铃保持 `[visual].planner_mode = "text"`、`replyer_mode = "text"`，以保留群聊的文字识图策略；私聊通过请求 Hook 单独补充图像。`wait_image_recognize_max_time = 15.0` 仍用于原生图片描述等待，不是整个识图任务的超时。
 
 私聊的 `maisaka.planner.before_request` 和 `maisaka.replyer.before_model_request` 使用同一条媒体读取链：查询最近 60 条、30 天内的消息，仅处理真实归属本会话且已进入当前请求的消息。通过 `message.get_by_id(include_binary_data=True)` 读取附件，向原消息的 Context Item 增加图像 Part，保留文本、来源和时间。普通引用最多展开两条同会话目标，不递归转发；引用图也可直接观察。每组帧标注来源消息 ID，只能用于对应原消息，不能代替后来消息中的附件。
 

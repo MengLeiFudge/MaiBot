@@ -13,6 +13,9 @@ reply_style = "使用自然、简短的中文聊天语气。技术问题回答�
 multiple_reply_style = []
 multiple_probability = 0.0
 
+[emoji]
+steal_emoji = true
+
 [maim_message]
 ws_server_host = "127.0.0.1"
 ws_server_port = 8021

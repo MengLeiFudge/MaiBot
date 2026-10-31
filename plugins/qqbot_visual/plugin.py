@@ -14,7 +14,7 @@ from .private_media import PrivateMediaContext
 class PluginSection(PluginConfigBase):
     """入站图片门控的启用与配置版本。"""
 
-    enabled: bool = Field(default=True, description="是否只让定向消息进入原生识图链")
+    enabled: bool = Field(default=True, description="是否启用图片门控与表情收集放行")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -24,14 +24,16 @@ class VisualConfig(PluginConfigBase):
     plugin: PluginSection = Field(default_factory=PluginSection)
 
 
-def _mask_media(segments: list[Any]) -> bool:
-    """递归屏蔽非定向媒体，保留已有描述与原组件的 hash。"""
+def _mask_media(segments: list[Any], *, collect_emoji: bool = False) -> bool:
+    """递归屏蔽非定向图片；收集开启时保留表情及其二进制。"""
     changed = False
     for value in segments:
         if not isinstance(value, dict):
             continue
         part = cast(dict[str, Any], value)
         kind = part.get("type")
+        if kind == "emoji" and collect_emoji:
+            continue
         if kind in {"image", "emoji"}:
             content = str(part.get("data") or "").strip()
             if not content or content in {"[图片，识别中.....]", "[image]"}:
@@ -43,7 +45,7 @@ def _mask_media(segments: list[Any]) -> bool:
         elif kind == "forward" and isinstance(part.get("data"), list):
             for node in part["data"]:
                 if isinstance(node, dict) and isinstance(node.get("content"), list):
-                    changed = _mask_media(node["content"]) or changed
+                    changed = _mask_media(node["content"], collect_emoji=collect_emoji) or changed
     return changed
 
 
@@ -54,33 +56,38 @@ class QQBotVisualPlugin(MaiBotPlugin):
     config_reload_subscriptions: ClassVar[tuple[str, ...]] = (ON_BOT_CONFIG_RELOAD,)
 
     def __init__(self) -> None:
-        """初始化本人身份；媒体缓存由加载回调创建、卸载回调释放。"""
+        """初始化身份和收集开关；私聊媒体缓存随插件生命周期维护。"""
         super().__init__()
         self._bot_id = ""
         self._names: tuple[str, ...] = ()
+        self._collect_emoji = False
         self._private_media: PrivateMediaContext | None = None
 
-    async def _reload_bot_identity(self) -> None:
-        """通过公开 config.get 读取本人身份，完整校验后一起替换。"""
+    async def _reload_bot_config(self) -> None:
+        """通过公开 config.get 读取身份和收集开关，校验后一起替换。"""
         async with asyncio.timeout(3):
-            platform, bot_id, nickname, aliases = await asyncio.gather(
+            platform, bot_id, nickname, aliases, collect_emoji = await asyncio.gather(
                 self.ctx.config.get("bot.platform"),
                 self.ctx.config.get("bot.qq_account"),
                 self.ctx.config.get("bot.nickname"),
                 self.ctx.config.get("bot.alias_names"),
+                self.ctx.config.get("emoji.steal_emoji"),
             )
         if platform != "qq" or not isinstance(bot_id, str) or not bot_id.isascii() or not bot_id.isdecimal():
             raise ValueError("定向看图插件需要 bot.platform=qq 和真实 bot.qq_account")
         if not isinstance(nickname, str) or not isinstance(aliases, list) or not all(isinstance(name, str) for name in aliases):
             raise ValueError("bot.nickname 和 bot.alias_names 配置类型不合法")
+        if not isinstance(collect_emoji, bool):
+            raise ValueError("emoji.steal_emoji 必须为布尔值")
         self._bot_id = bot_id
         self._names = tuple(dict.fromkeys(name.strip() for name in [nickname, *aliases] if name.strip()))
+        self._collect_emoji = collect_emoji
 
     async def on_load(self) -> None:
         """读取原生身份配置，加载阶段不识图。"""
-        await self._reload_bot_identity()
+        await self._reload_bot_config()
         self._private_media = PrivateMediaContext(self.ctx)
-        self.ctx.logger.info("QQBot 定向看图已加载；私聊在 Planner 和 Replyer 请求前补充图片及表情原图")
+        self.ctx.logger.info("QQBot 定向看图已加载，表情收集=%s；私聊在 Planner 和 Replyer 请求前补充图片及表情原图", self._collect_emoji)
 
     async def on_unload(self) -> None:
         """清空身份和有界媒体缓存；没有后台识别任务。"""
@@ -89,13 +96,14 @@ class QQBotVisualPlugin(MaiBotPlugin):
             self._private_media = None
         self._bot_id = ""
         self._names = ()
+        self._collect_emoji = False
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
-        """跟随 bot 配置更新本人账号和称呼。"""
+        """跟随 bot 配置更新本人身份和表情收集开关。"""
         del config_data
         if scope == ON_BOT_CONFIG_RELOAD:
-            await self._reload_bot_identity()
-            self.ctx.logger.info("QQBot 定向看图身份已更新: version=%s", version)
+            await self._reload_bot_config()
+            self.ctx.logger.info("QQBot 定向看图配置已更新: version=%s", version)
 
     def _is_directed(self, message: Mapping[str, Any]) -> bool:
         """只读取当前顶层正文及结构化 @/回复，不用转发内容触发识图。"""
@@ -172,7 +180,7 @@ class QQBotVisualPlugin(MaiBotPlugin):
     @HookHandler(
         "chat.receive.before_process",
         name="qqbot_visual_receive_gate",
-        description="非定向媒体使用中性占位；定向附件放行，引用图片只复用已有描述",
+        description="非定向图片使用占位；收集开启时放行表情，定向附件沿用原生处理",
         mode=HookMode.BLOCKING,
         order=HookOrder.EARLY,
         timeout_ms=5000,
@@ -196,7 +204,7 @@ class QQBotVisualPlugin(MaiBotPlugin):
                 self.ctx.logger.warning("引用图片描述查询失败，保持原引用: error_type=%s", type(exc).__name__)
                 return {"action": "continue"}
         else:
-            changed = _mask_media(modified["raw_message"])
+            changed = _mask_media(modified["raw_message"], collect_emoji=self._collect_emoji)
         if not changed:
             return {"action": "continue"}
         return {"action": "continue", "modified_kwargs": {**kwargs, "message": modified}}
