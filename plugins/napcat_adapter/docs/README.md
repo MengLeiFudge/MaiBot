@@ -17,6 +17,10 @@
 - [File 透传 API](./file-api.md)
 - [核验与兼容性说明](./verification.md)
 
+## 自动同意请求
+
+`runtime/router.py` 的 `NapCatEventRouter.handle_request_event` 直接调用 OneBot 动作，自动同意好友申请、邀请机器人入群和成员加群申请。该能力随适配器启用，不依赖 `qqbot_group` 或普通聊天名单；未知申请、缺失 flag 和处理失败均在接入层消费，不注入聊天、记忆或模型。动作失败写入适配器日志，成功申请在当前连接内有界去重。
+
 ## 先看调用方式
 
 ### 强类型封装 API
