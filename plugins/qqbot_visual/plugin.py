@@ -11,7 +11,7 @@ from maibot_sdk import ON_BOT_CONFIG_RELOAD, Field, HookHandler, MaiBotPlugin, P
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 
-from .video_context import enrich_video_message
+from .video_context import VideoContext
 from .video_reader import VideoReader
 
 class PluginSection(PluginConfigBase):
@@ -66,6 +66,7 @@ class QQBotVisualPlugin(MaiBotPlugin):
         self._names: tuple[str, ...] = ()
         self._collect_emoji = False
         self._video_reader: VideoReader | None = None
+        self._video_context: VideoContext | None = None
 
     async def _reload_bot_config(self) -> None:
         """通过公开 config.get 读取身份和收集开关，校验后一起替换。"""
@@ -91,6 +92,7 @@ class QQBotVisualPlugin(MaiBotPlugin):
         """读取身份配置并创建视频读取器，加载阶段不处理媒体。"""
         await self._reload_bot_config()
         self._video_reader = VideoReader(Path(self.ctx.paths.data_dir) / "videos")
+        self._video_context = VideoContext(self.ctx, self._video_reader)
         self.ctx.logger.info("视频分镜已加载：enabled=%s tools_ready=%s", cast(VisualConfig, self.config).video_enabled, self._video_reader.tools_ready)
         self.ctx.logger.info("QQBot 定向看图已加载，表情收集=%s；引用图片仅复用已有描述", self._collect_emoji)
 
@@ -99,6 +101,9 @@ class QQBotVisualPlugin(MaiBotPlugin):
         if self._video_reader is not None:
             await self._video_reader.close()
             self._video_reader = None
+        if self._video_context is not None:
+            self._video_context.clear()
+            self._video_context = None
         self._bot_id = ""
         self._names = ()
         self._collect_emoji = False
@@ -112,13 +117,13 @@ class QQBotVisualPlugin(MaiBotPlugin):
 
     @HookHandler(
         "chat.receive.before_process", name="qqbot_visual_video",
-        description="下载视频链接或附件并追加分镜画面描述",
-        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=110000, error_policy=ErrorPolicy.SKIP,
+        description="登记当前视频来源，由实际主模型请求读取DSH分镜",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=5000, error_policy=ErrorPolicy.SKIP,
     )
     async def read_video(self, message: object = None, **kwargs: Any) -> dict[str, object]:
         """只处理本次消息的视频，保持聊天触发和既有图像门控。"""
-        reader = self._video_reader
-        if not cast(VisualConfig, self.config).plugin.enabled or not cast(VisualConfig, self.config).video_enabled or reader is None:
+        media = self._video_context
+        if not cast(VisualConfig, self.config).plugin.enabled or not cast(VisualConfig, self.config).video_enabled or media is None:
             return {"action": "continue"}
         if not isinstance(message, dict) or message.get("platform") != "qq" or message.get("is_notify") is True:
             return {"action": "continue"}
@@ -126,10 +131,41 @@ class QQBotVisualPlugin(MaiBotPlugin):
         sender = info.get("user_info") if isinstance(info, Mapping) else None
         if isinstance(sender, Mapping) and str(sender.get("user_id")) == self._bot_id:
             return {"action": "continue"}
-        modified = await enrich_video_message(self.ctx, reader, cast(dict[str, Any], message))
+        modified = media.remember(cast(dict[str, Any], message))
         if modified is None:
             return {"action": "continue"}
         return {"action": "continue", "modified_kwargs": {**kwargs, "message": modified}}
+
+    async def _attach_video(self, session_id: str, items: object, item_schema_version: int, kwargs: dict[str, Any], *, visual: bool = True) -> dict[str, object]:
+        """把分镜原图放进公开Context Items，不调用额外摘要模型。"""
+        media = self._video_context
+        if (not cast(VisualConfig, self.config).plugin.enabled or not cast(VisualConfig, self.config).video_enabled
+                or media is None or not session_id or item_schema_version != 1 or not isinstance(items, list)):
+            return {"action": "continue"}
+        enriched = await media.enrich(session_id, items, visual=visual)
+        if self._video_context is not media or enriched == items:
+            return {"action": "continue"}
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "session_id": session_id, "items": enriched, "item_schema_version": item_schema_version,
+        }}
+
+    @HookHandler(
+        "maisaka.planner.before_request", name="qqbot_visual_video_planner",
+        description="为规划模型附上同会话视频的DSH分镜原图和时间清单",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=190000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def prepare_video_planner(self, session_id: str = "", items: object = None, item_schema_version: int = 0, **kwargs: Any) -> dict[str, object]:
+        """规划模型直接读取视频画面和时间信息。"""
+        return await self._attach_video(session_id, items, item_schema_version, kwargs)
+
+    @HookHandler(
+        "maisaka.replyer.before_model_request", name="qqbot_visual_video_replyer",
+        description="为实际回复模型附上同会话视频的DSH分镜原图和时间清单",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=190000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def prepare_video_replyer(self, session_id: str = "", items: object = None, item_schema_version: int = 0, **kwargs: Any) -> dict[str, object]:
+        """回复模型独立取得分镜，不依赖规划器转述。"""
+        return await self._attach_video(session_id, items, item_schema_version, kwargs, visual=kwargs.get("selected_model_visual") is True)
 
     def _is_directed(self, message: Mapping[str, Any]) -> bool:
         """只读取当前顶层正文及结构化 @/回复，不用转发内容触发识图。"""

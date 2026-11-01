@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-visual",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "name": "QQBot 定向看图",
-  "description": "门控群聊图片、放行本地表情收集，并下载视频链接或附件生成分镜描述。",
+  "description": "门控群聊图片、放行本地表情收集，并把DSH视频分镜原图附给主聊天模型。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {
@@ -16,10 +16,11 @@
   "dependencies": [
     {"type": "python_package", "name": "Pillow", "version_spec": ">=11.3,<13"},
     {"type": "python_package", "name": "aiohttp", "version_spec": ">=3.8"},
-    {"type": "python_package", "name": "yt-dlp", "version_spec": ">=2025.10.14"},
+    {"type": "python_package", "name": "yt-dlp", "version_spec": ">=2026.10.26"},
+    {"type": "python_package", "name": "curl_cffi", "version_spec": ">=0.13,<0.17"},
     {"type": "python_package", "name": "ffmpeg-binaries", "version_spec": "==1.1.0"}
   ],
-  "capabilities": ["config.get", "message.get_by_id", "llm.generate"],
+  "capabilities": ["config.get", "message.get_by_id"],
   "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
   "plugin_type": "extension"
 }
