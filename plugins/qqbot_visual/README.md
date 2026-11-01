@@ -1,6 +1,6 @@
 # QQBot 定向看图
 
-`qqbot_visual` 使用 MaiBot 1.2.3 的公开 SDK/Hook：接收阶段门控群聊媒体，私聊在 Planner 和 Replyer 请求前补充图像。视频通过现有 `vlm` 任务读取分镜图，使用说明见 [视频分镜](VIDEO.md)。
+`qqbot_visual` 使用 MaiBot 1.2.3 的公开 SDK/Hook：接收阶段门控群聊媒体，私聊在 Planner 和 Replyer 请求前补充图像。视频分镜原图直接附给主聊天模型，使用说明见 [视频分镜](VIDEO.md)。
 
 将 `config.example.toml` 复制为本机 `config.toml` 并启用。本人 QQ、昵称、别名和表情收集开关通过 `config.get` 读取 `bot.qq_account/nickname/alias_names` 与 `emoji.steal_emoji`，跟随 bot 配置热重载。定向消息包括私聊、群聊中的本人真实 @、适配器 `at_bot`、回复本人，以及当前顶层正文含昵称或别名；机器人自己的发言排除。转发、引用正文和图片描述中的名字不参与呼叫判定。
 
