@@ -2,11 +2,11 @@
 
 在聊天中发送可公开访问的视频链接，或带下载地址的 QQ 视频附件。插件使用 [DSH Video Storyboard](https://github.com/SAOS-3624/dsh-video-storyboard) 扫描画面变化，检测镜头边界，再按切换密度排版代表帧。Planner 和 Replyer 的公开请求 Hook 直接把分镜原图、逐格时间清单及可用字幕附到原消息的 Context Item。群聊、私聊共用视频能力，聊天触发、图片门控和表情收集沿用原配置。
 
-支持 B站长链、b23 短链、YouTube、抖音、小红书、微博、腾讯视频、西瓜等域名，以及 HTTP/HTTPS 视频文件直链。网页解析由 yt-dlp 提供；登录限制或站点风控可能阻止下载。QQ 视频地址由本地 `napcat_adapter` 的 `_build_video_text_segment` 保留；缺少地址时提示改发链接或重传。
+支持 B站长链、b23 短链、YouTube、X/Twitter、抖音、小红书、微博、腾讯视频、西瓜等域名，以及 HTTP/HTTPS 视频文件直链。网页解析由 yt-dlp 提供；登录限制或站点风控可能阻止下载。QQ 视频地址由本地 `napcat_adapter` 的 `_build_video_text_segment` 保留；缺少地址时提示改发链接或重传。
 
 ## 安装与配置
 
-使用本项目虚拟环境安装清单中的依赖，并安装 Node.js 20 或更新版本。FFmpeg 和 ffprobe 来自 `ffmpeg-binaries`，也可放在本插件的 `tools/ffmpeg/bin/` 或 PATH 中。分镜引擎源码随插件提供，无需安装 DSH 应用。B站下载使用直连；其他站点复用本机 HTTP/HTTPS 代理。网页下载通过 curl_cffi 提供浏览器 TLS，并保持证书校验。
+使用本项目虚拟环境安装清单中的依赖，并安装 Node.js 20 或更新版本。FFmpeg 和 ffprobe 来自 `ffmpeg-binaries`，也可放在本插件的 `tools/ffmpeg/bin/` 或 PATH 中。分镜引擎源码随插件提供，无需安装 DSH 应用。B站下载使用直连；X/Twitter和其他站点复用本机 HTTP/HTTPS 代理。X/Twitter使用公开帖子的嵌入信息解析视频，该接口可能不提供帖子的全部媒体或元数据。网页下载通过 curl_cffi 提供浏览器 TLS，并保持证书校验。
 
 插件顶层的 `video_enabled` 默认开启，在 `config.toml` 的 `[plugin]` 前设置：
 
