@@ -40,7 +40,7 @@ VIDEO_CAPABILITY = (
     "具体内容以实际附入的分镜和字幕为准；下载失败时说明实际原因，不编造画面或声音。"
 )
 VIDEO_DOMAINS = (
-    "b23.tv", "bilibili.com", "bili2233.cn", "youtube.com", "youtu.be",
+    "b23.tv", "bilibili.com", "bili2233.cn", "youtube.com", "youtu.be", "x.com", "twitter.com",
     "douyin.com", "xhslink.com", "xiaohongshu.com", "weibo.com", "v.qq.com", "ixigua.com",
 )
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi", ".flv"}
@@ -319,7 +319,10 @@ class VideoReader:
             "--no-progress", "--no-simulate", "--encoding", "utf-8", "--no-playlist", "--playlist-items", "1", "--no-cache-dir",
             "--use-extractors", "default,-generic", "--retries", "1", "--fragment-retries", "1",
             "--socket-timeout", "15", "--max-filesize", "80M", "--proxy", proxy,
-            "--impersonate", "Chrome", "--match-filter", "!is_live & duration <=? 600",
+            "--impersonate", "Chrome",
+            # X公开嵌入接口无需访问当前TLS失败的访客令牌接口。
+            *(["--extractor-args", "twitter:api=syndication"] if any(host == domain or host.endswith("." + domain) for domain in ("x.com", "twitter.com")) else []),
+            "--match-filter", "!is_live & duration <=? 600",
             "--ffmpeg-location", str(Path(self._ffmpeg or "").parent),
             "--format", "bv*[height<=480]+ba/b[height<=480]/bv*[width<=480]+ba/b[width<=480]",
             "--merge-output-format", "mp4", "--write-subs", "--write-auto-subs",
