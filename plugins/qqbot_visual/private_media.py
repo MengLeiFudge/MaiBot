@@ -28,8 +28,12 @@ def image_frames(encoded: str) -> list[dict[str, str]]:
     binary = base64.b64decode(encoded, validate=True)
     parts: list[dict[str, str]] = []
     with Image.open(BytesIO(binary)) as image:
+        if image.format == "JPEG":
+            # JPEG 在解码器内缩小，避免完整展开高分辨率原图。
+            scale = max(1.0, max(image.size) / MAX_IMAGE_EDGE)
+            image.draft("RGB", (max(1, int(image.width / scale)), max(1, int(image.height / scale))))
         if image.width * image.height > 40_000_000:
-            raise ValueError("私聊媒体像素数量过大")
+            raise ValueError(f"私聊媒体解码尺寸 {image.width}×{image.height} 超过 4000 万像素")
         # Pillow 的多帧属性由 GIF/WebP 等具体解码器提供。
         frames = getattr(image, "n_frames", 1)
         if frames > 300:
@@ -98,27 +102,42 @@ class PrivateMediaContext:
         return parts
 
     async def _segments(self, session_id: str, source: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-        """优先复用已恢复的帧；下载降级的占位按原消息恢复。"""
+        """优先复用已有媒体；占位或缺少字节的组件按原消息恢复。"""
         key = (session_id, source["message_id"])
         recovered = self._recovered.get(key)
         if recovered and all((session_id, part.get("hash", "")) in self._cache for part in recovered):
             self._recovered.move_to_end(key)
             return list(recovered)
+        segments: list[Mapping[str, Any]] = []
         if not has_missing_media(source):
             loaded = await self.ctx.message.get_by_id(source["message_id"], chat_id=session_id, include_binary_data=True)
             if not _private_message(loaded, session_id) or loaded.get("message_id") != source["message_id"]:
                 raise ValueError("未取得同会话原消息")
             segments = [part for part in loaded.get("raw_message", [])
                         if isinstance(part, Mapping) and part.get("type") in ("image", "emoji")]
-            return segments
+            if segments and all(part.get("binary_data_base64") or
+                                (session_id, part.get("hash", "")) in self._cache for part in segments):
+                return segments
         now = asyncio.get_running_loop().time()
         if now - self._attempts.get(key, float("-inf")) < 30:
+            if segments:
+                return segments
             raise ValueError("原媒体恢复失败，等待下一次重试")
         self._attempts[key] = now
         self._attempts.move_to_end(key)
         while len(self._attempts) > 32:
             self._attempts.popitem(last=False)
-        recovered = await recover_private_media(self.ctx, source)
+        try:
+            recovered = await recover_private_media(self.ctx, source)
+        except Exception:
+            if segments:
+                return segments
+            raise
+        if len(recovered) == len(segments):
+            # 原消息图片顺序一致时保留已取得的附件，只替换缺少字节的组件。
+            recovered = [dict(original) if original.get("binary_data_base64") or
+                         (session_id, original.get("hash", "")) in self._cache else restored
+                         for original, restored in zip(segments, recovered)]
         self._recovered[key] = [{"type": part["type"], "hash": part.get("hash", "")} for part in recovered]
         self._recovered.move_to_end(key)
         while len(self._recovered) > 32:
@@ -199,8 +218,11 @@ class PrivateMediaContext:
                         async with asyncio.timeout(max(0.01, deadline - asyncio.get_running_loop().time())):
                             frames = await self._frames(session_id, segment)
                     except Exception as exc:
-                        self.ctx.logger.warning("私聊媒体读取失败: msg_id=%s error_type=%s", source["message_id"], type(exc).__name__)
-                        additions.append(failure)
+                        reason = "媒体解码超时" if isinstance(exc, TimeoutError) else str(exc)
+                        reason = reason.replace("\r", " ").replace("\n", " ")[:160] or type(exc).__name__
+                        self.ctx.logger.warning("私聊媒体读取失败: msg_id=%s error_type=%s reason=%s",
+                                                source["message_id"], type(exc).__name__, reason)
+                        additions.append({**failure, "text": f"{failure['text']}\n[本地附件处理错误：{reason}]"})
                         continue
                     selected = frames[:budget]
                     label = "引用消息" if source is not message else "本条消息"

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-visual",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "name": "QQBot 定向看图",
   "description": "保留群聊图片门控、本地表情和私聊原图能力，把DSH视频分镜原图附给主聊天模型。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
