@@ -1,18 +1,18 @@
 # QQBot 定向看图
 
-`qqbot_visual` 使用 MaiBot 1.2.3 的公开 SDK/Hook：接收阶段门控群聊媒体，私聊在 Planner 和 Replyer 请求前补充图像。视频分镜原图直接附给主聊天模型，使用说明见 [视频分镜](VIDEO.md)。
+`qqbot_visual` 使用 MaiBot 1.2.3 的公开 SDK/Hook：接收阶段门控群聊媒体，在 Planner 和 Replyer 请求前补充私聊附件及群聊定向消息引用的原图。视频分镜原图直接附给主聊天模型，使用说明见 [视频分镜](VIDEO.md)。
 
 将 `config.example.toml` 复制为本机 `config.toml` 并启用。本人 QQ、昵称、别名和表情收集开关通过 `config.get` 读取 `bot.qq_account/nickname/alias_names` 与 `emoji.steal_emoji`，跟随 bot 配置热重载。定向消息包括私聊、群聊中的本人真实 @、适配器 `at_bot`、回复本人，以及当前顶层正文含昵称或别名；机器人自己的发言排除。转发、引用正文和图片描述中的名字不参与呼叫判定。
 
 非定向普通图片保留已有描述，缺描述时写 `[图片]`，移除 `binary_data_base64`，保留组件 hash 和其余路由、发送者、时间及文本。转发中的媒体递归处理。原生组件遇到非空 content 会跳过 VLM 和保存，因此普通新群图不保证进入媒体文件缓存。设置 `emoji.steal_emoji = true` 后，表情组件保留原始数据与二进制，进入原生表情描述、缓存和本地注册链；关闭该开关时，非定向表情沿用占位策略。注册数量、检查间隔、单图大小和替换规则沿用 `[emoji]` 配置。
 
-蓝铃保持 `[visual].planner_mode = "text"`、`replyer_mode = "text"`，以保留群聊的文字识图策略；私聊通过请求 Hook 单独补充图像。`wait_image_recognize_max_time = 15.0` 仍用于原生图片描述等待，不是整个识图任务的超时。
+蓝铃保持 `[visual].planner_mode = "text"`、`replyer_mode = "text"`，以保留群聊的文字识图策略；私聊附件和群聊定向引用图通过请求 Hook 单独补充。`wait_image_recognize_max_time = 15.0` 仍用于原生图片描述等待，不是整个识图任务的超时。
 
-私聊的 `maisaka.planner.before_request` 和 `maisaka.replyer.before_model_request` 使用同一条媒体读取链：查询最近 60 条、30 天内的消息，仅处理真实归属本会话且已进入当前请求的消息。通过 `message.get_by_id(include_binary_data=True)` 读取附件，向原消息的 Context Item 增加图像 Part，保留文本、来源和时间。普通引用最多展开两条同会话目标，不递归转发；引用图也可直接观察。每组帧标注来源消息 ID，只能用于对应原消息，不能代替后来消息中的附件。
+`maisaka.planner.before_request` 和 `maisaka.replyer.before_model_request` 使用 `image_context.py` 的同一条媒体读取链：查询最近 60 条、30 天内的消息，仅处理真实归属本会话且已进入当前请求的消息。通过 `message.get_by_id(include_binary_data=True)` 读取附件，向原消息的 Context Item 增加图像 Part，保留文本、来源和时间。普通引用最多展开两条同会话目标，不递归转发。群聊只有定向消息展开自身附件及显式引用图，非定向普通图片仍沿用占位策略。每组帧标注来源消息 ID，只能用于对应原消息，不能代替后来消息中的附件。
 
-如果适配器记录的原始段类型含 `image`，但下载失败后只留下 `[image]`/`[emoji]`，或已有图片/表情组件未取得原文件字节，插件通过公开 `adapter.napcat.message.get_msg` 取得原消息。核对消息 ID、私聊类型和发送者后，用其中的文件标识调用 `adapter.napcat.file.get_image`，由 QQ 下载到本机，再读取返回的绝对文件路径或 base64。不会从聊天正文读取路径或 URL，不修改数据库中的历史消息。依赖 NapCat Adapter 1.3.4 及 `api.call` 权限。
+如果适配器记录的原始段类型含 `image`，但下载失败后只留下 `[image]`/`[emoji]`，或已有图片/表情组件未取得原文件字节，插件通过公开 `adapter.napcat.message.get_msg` 取得原消息。核对消息 ID、私聊或群聊类型、原发送者及群 ID 后，用其中的文件标识调用 `adapter.napcat.file.get_image`，由 QQ 下载到本机，再读取返回的绝对文件路径或 base64。不会从聊天正文读取路径或 URL，不修改数据库中的历史消息。依赖 NapCat Adapter 1.3.4 及 `api.call` 权限。
 
-需要 Planner 和 Replyer 所用模型开启且实际支持 `visual`；蓝铃当前使用支持视觉的 `deepseek-flash`。全局 `text` 模式不影响插件补入的图像 Part。Replyer 报告所选模型不支持视觉时不补图。私聊原图补充不额外请求识别模型，图像会增加当前请求的输入量；最终能否识别细节仍取决于模型。
+需要 Planner 和 Replyer 所用模型开启且实际支持 `visual`；蓝铃当前使用支持视觉的 `deepseek-flash`。全局 `text` 模式不影响插件补入的图像 Part。Replyer 报告所选模型不支持视觉时不补图。原图补充不额外请求识别模型，图像会增加当前请求的输入量；最终能否识别细节仍取决于模型。
 
 图片由已安装的 Pillow 解码，最大边缩到 2048，转为 JPEG；透明背景转白色，EXIF 方向校正。JPEG 先按目标尺寸在解码器内降采样，再校验解码像素数量，避免可缩小的高分辨率照片被原始像素上限拒绝；Pillow 自身的图像解压保护仍生效。GIF/WebP 等动图抽首、中、末帧，代表帧不等于完整动作识别。每轮最多补充八帧，优先较新的消息。源文件最多 30 MiB、300 帧，解码尺寸最多 4000 万像素；解码结果最多缓存 16 项、24 MiB，按会话与媒体 hash 隔离，只存内存，卸载释放。不会另存或修改原图。
 
@@ -20,4 +20,4 @@
 
 接收阶段对定向引用仍最多用 3 秒补充同会话已有描述；查询失败保留原引用。这段兼容处理不会重新识别或下载图片。
 
-接收 Hook 不覆盖框架内部对机器人已发图、工具结果图创建的后台识图任务；这些任务仍沿用原生行为。插件禁用、加载失败或 Hook 被跳过时恢复原生行为。日志记录启用状态、实际补入图像的源消息 ID、帧数和错误类型；本地解码失败还记录最多 160 字符的具体原因，并写入对应附件的未读取标记。不记录图片、消息正文、下载 URL 或账号。此私聊直读实现仅部署在独立蓝铃，不同步到夜凛。
+接收 Hook 不覆盖框架内部对机器人已发图、工具结果图创建的后台识图任务；这些任务仍沿用原生行为。插件禁用、加载失败或 Hook 被跳过时恢复原生行为。日志记录启用状态、实际补入图像的源消息 ID、帧数和错误类型；本地解码失败还记录最多 160 字符的具体原因，并写入对应附件的未读取标记。不记录图片、消息正文、下载 URL 或账号。此原图直读实现仅部署在独立蓝铃，不同步到夜凛。

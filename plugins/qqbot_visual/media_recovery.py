@@ -47,7 +47,7 @@ def _read_image(data: Mapping[str, Any]) -> bytes:
     return binary
 
 
-async def recover_private_media(ctx: Any, source: Mapping[str, Any]) -> list[dict[str, str]]:
+async def recover_media(ctx: Any, source: Mapping[str, Any]) -> list[dict[str, str]]:
     """用原消息的文件标识请求 QQ 本机下载，绕开下载失败的远程图片链接。"""
     message_id = source["message_id"]
     detail = await ctx.api.call("adapter.napcat.message.get_msg", version="1", message_id=message_id)
@@ -55,9 +55,12 @@ async def recover_private_media(ctx: Any, source: Mapping[str, Any]) -> list[dic
         raise ValueError("NapCat 未返回对应原消息")
     sender = detail.get("sender")
     owner = source["message_info"]["user_info"]["user_id"]
-    if (detail.get("message_type") != "private" or detail.get("group_id")
+    group = source["message_info"].get("group_info")
+    expected_group = str(group["group_id"]) if isinstance(group, Mapping) else ""
+    if (detail.get("message_type") != ("group" if expected_group else "private")
+            or str(detail.get("group_id") or "") != expected_group
             or not isinstance(sender, Mapping) or str(sender.get("user_id")) != str(owner)):
-        raise ValueError("NapCat 原消息不属于此私聊发送者")
+        raise ValueError("NapCat 原消息不属于此会话和原发送者")
     raw = detail.get("message")
     if not isinstance(raw, list):
         raise ValueError("NapCat 未返回结构化原消息")
@@ -83,7 +86,7 @@ async def recover_private_media(ctx: Any, source: Mapping[str, Any]) -> list[dic
                 "binary_data_base64": base64.b64encode(binary).decode("ascii"),
             })
         except Exception as exc:
-            ctx.logger.warning("私聊原媒体恢复失败: msg_id=%s error_type=%s", message_id, type(exc).__name__)
+            ctx.logger.warning("原媒体恢复失败: msg_id=%s error_type=%s", message_id, type(exc).__name__)
             segments.append({"type": kind})
         if len(segments) >= 8:
             break

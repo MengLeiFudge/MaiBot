@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from html import unescape
 from io import BytesIO
 from typing import Any
@@ -12,7 +12,7 @@ import re
 
 from PIL import Image, ImageOps
 
-from .media_recovery import MAX_SOURCE_BYTES, has_missing_media, recover_private_media
+from .media_recovery import MAX_SOURCE_BYTES, has_missing_media, recover_media
 
 
 MAX_IMAGE_PARTS = 8
@@ -24,7 +24,7 @@ MESSAGE_PREFIX = re.compile(r'^<message msg_id="([^"]+)"(?:\s|>)')
 def image_frames(encoded: str) -> list[dict[str, str]]:
     """把原图或动图的首、中、末帧转成有界 JPEG，不改写原媒体文件。"""
     if len(encoded) > (MAX_SOURCE_BYTES + 2) // 3 * 4:
-        raise ValueError("私聊媒体超过 30 MiB")
+        raise ValueError("图片附件超过 30 MiB")
     binary = base64.b64decode(encoded, validate=True)
     parts: list[dict[str, str]] = []
     with Image.open(BytesIO(binary)) as image:
@@ -33,11 +33,11 @@ def image_frames(encoded: str) -> list[dict[str, str]]:
             scale = max(1.0, max(image.size) / MAX_IMAGE_EDGE)
             image.draft("RGB", (max(1, int(image.width / scale)), max(1, int(image.height / scale))))
         if image.width * image.height > 40_000_000:
-            raise ValueError(f"私聊媒体解码尺寸 {image.width}×{image.height} 超过 4000 万像素")
+            raise ValueError(f"图片附件解码尺寸 {image.width}×{image.height} 超过 4000 万像素")
         # Pillow 的多帧属性由 GIF/WebP 等具体解码器提供。
         frames = getattr(image, "n_frames", 1)
         if frames > 300:
-            raise ValueError("私聊动图超过 300 帧")
+            raise ValueError("动图附件超过 300 帧")
         indices = sorted({0, (frames - 1) // 2, frames - 1})
         for index in indices:
             image.seek(index)
@@ -54,19 +54,20 @@ def image_frames(encoded: str) -> list[dict[str, str]]:
     return parts
 
 
-def _private_message(message: object, session_id: str) -> bool:
+def _chat_message(message: object, session_id: str) -> bool:
     """会话类型和归属只依据消息 API 的结构化事实。"""
     if not isinstance(message, Mapping) or message.get("session_id") != session_id or message.get("platform") != "qq":
         return False
     info = message.get("message_info")
-    return isinstance(info, Mapping) and not info.get("group_info") and isinstance(info.get("user_info"), Mapping)
+    return isinstance(info, Mapping) and isinstance(info.get("user_info"), Mapping)
 
 
-class PrivateMediaContext:
-    """在同一条私聊 Context Item 上补充图像；缓存仅在插件进程内存活。"""
+class ImageContext:
+    """补充私聊附件和群聊定向引用图；缓存仅在插件进程内存活。"""
 
-    def __init__(self, ctx: Any) -> None:
+    def __init__(self, ctx: Any, is_directed: Callable[[Mapping[str, Any]], bool]) -> None:
         self.ctx = ctx
+        self._is_directed = is_directed
         self._cache: OrderedDict[tuple[str, str], list[dict[str, str]]] = OrderedDict()
         self._cache_bytes = 0
         self._recovered: OrderedDict[tuple[str, str], list[dict[str, str]]] = OrderedDict()
@@ -111,7 +112,7 @@ class PrivateMediaContext:
         segments: list[Mapping[str, Any]] = []
         if not has_missing_media(source):
             loaded = await self.ctx.message.get_by_id(source["message_id"], chat_id=session_id, include_binary_data=True)
-            if not _private_message(loaded, session_id) or loaded.get("message_id") != source["message_id"]:
+            if not _chat_message(loaded, session_id) or loaded.get("message_id") != source["message_id"]:
                 raise ValueError("未取得同会话原消息")
             segments = [part for part in loaded.get("raw_message", [])
                         if isinstance(part, Mapping) and part.get("type") in ("image", "emoji")]
@@ -128,7 +129,7 @@ class PrivateMediaContext:
         while len(self._attempts) > 32:
             self._attempts.popitem(last=False)
         try:
-            recovered = await recover_private_media(self.ctx, source)
+            recovered = await recover_media(self.ctx, source)
         except Exception:
             if segments:
                 return segments
@@ -145,7 +146,7 @@ class PrivateMediaContext:
         return list(recovered)
 
     async def enrich(self, session_id: str, items: list[Any]) -> list[Any]:
-        """只展开已在本轮上下文的私聊消息，最多八帧，优先最新消息。"""
+        """展开本轮私聊或群聊定向消息的附件与引用，最多八帧。"""
         candidates: list[tuple[int, str]] = []
         for index, item in enumerate(items):
             if not isinstance(item, Mapping) or item.get("item_type") != "UserMessageItem":
@@ -164,16 +165,19 @@ class PrivateMediaContext:
             "message.get_recent", chat_id=session_id, limit=60, hours=720,
             filter_mai=False, include_binary_data=False,
         )
-        if not isinstance(recent, list) or not recent or not _private_message(recent[-1], session_id):
+        if not isinstance(recent, list) or not recent or not _chat_message(recent[-1], session_id):
             return items
-        messages = {message["message_id"]: message for message in recent if _private_message(message, session_id)}
+        group = recent[-1]["message_info"].get("group_info")
+        group_id = group.get("group_id") if isinstance(group, Mapping) else None
+        messages = {message["message_id"]: message for message in recent if _chat_message(message, session_id)
+                    and (message["message_info"].get("group_info") or {}).get("group_id") == group_id}
         enriched = list(items)
         budget = MAX_IMAGE_PARTS
         attached = 0
         quoted_count = 0
         for index, message_id in reversed(candidates):
             message = messages.get(message_id)
-            if message is None:
+            if message is None or group_id and not self._is_directed(message):
                 continue
             sources = [message]
             # 普通引用只查同会话一层，避免引用图片仍只剩一段摘要。
@@ -189,9 +193,10 @@ class PrivateMediaContext:
                     async with asyncio.timeout(max(0.01, min(1, deadline - asyncio.get_running_loop().time()))):
                         quoted = await self.ctx.message.get_by_id(target, chat_id=session_id, include_binary_data=False)
                 except Exception as exc:
-                    self.ctx.logger.warning("私聊引用原消息查询失败: msg_id=%s error_type=%s", target, type(exc).__name__)
+                    self.ctx.logger.warning("引用原消息查询失败: msg_id=%s error_type=%s", target, type(exc).__name__)
                     continue
-                if _private_message(quoted, session_id) and quoted.get("message_id") == target:
+                if (_chat_message(quoted, session_id) and quoted.get("message_id") == target
+                        and (quoted["message_info"].get("group_info") or {}).get("group_id") == group_id):
                     sources.append(quoted)
             additions: list[dict[str, str]] = []
             for source in sources:
@@ -209,7 +214,7 @@ class PrivateMediaContext:
                     async with asyncio.timeout(max(0.01, min(4, deadline - asyncio.get_running_loop().time()))):
                         segments = await self._segments(session_id, source)
                 except Exception as exc:
-                    self.ctx.logger.warning("私聊原媒体未取得: msg_id=%s error_type=%s", source["message_id"], type(exc).__name__)
+                    self.ctx.logger.warning("原媒体未取得: msg_id=%s error_type=%s", source["message_id"], type(exc).__name__)
                     additions.append(failure)
                     continue
                 source_frames = 0
@@ -220,7 +225,7 @@ class PrivateMediaContext:
                     except Exception as exc:
                         reason = "媒体解码超时" if isinstance(exc, TimeoutError) else str(exc)
                         reason = reason.replace("\r", " ").replace("\n", " ")[:160] or type(exc).__name__
-                        self.ctx.logger.warning("私聊媒体读取失败: msg_id=%s error_type=%s reason=%s",
+                        self.ctx.logger.warning("图片附件读取失败: msg_id=%s error_type=%s reason=%s",
                                                 source["message_id"], type(exc).__name__, reason)
                         additions.append({**failure, "text": f"{failure['text']}\n[本地附件处理错误：{reason}]"})
                         continue
@@ -240,7 +245,7 @@ class PrivateMediaContext:
                     if budget == 0:
                         break
                 if source_frames:
-                    self.ctx.logger.info("私聊图像已附到模型上下文: msg_id=%s frames=%s", source["message_id"], source_frames)
+                    self.ctx.logger.info("原图已附到模型上下文: msg_id=%s frames=%s", source["message_id"], source_frames)
                 if budget == 0:
                     break
             if additions:
@@ -248,5 +253,5 @@ class PrivateMediaContext:
             if budget == 0:
                 break
         if attached:
-            self.ctx.logger.info("私聊模型上下文已补充媒体，图像帧数=%s", attached)
+            self.ctx.logger.info("模型上下文已补充原图，图像帧数=%s", attached)
         return enriched
