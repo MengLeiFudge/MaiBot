@@ -31,7 +31,7 @@ try {
   const evidence = buildEvidence(result);
   evidence.input = options.source;
   result.info.path = 'shared-video';
-  const manifest = formatManifest(result, { maxChars: 24000 })
+  const manifest = formatManifest(result, { maxChars: 24000, omitTranscript: options.screenText === true })
     .replace(/\s+tokens="[^"]*"/g, '')
     .split('\n').filter(line => !/vision tokens|^sheet already in context:|^per-cell times for verification:/.test(line)).join('\n');
   await writeFile(join(options.output, 'result.json'), JSON.stringify({
