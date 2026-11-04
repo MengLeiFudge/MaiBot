@@ -8,7 +8,7 @@ client_type = "openai_responses"
 base_url = "https://api.deepseek.com"
 api_key = "<set-only-in-config/model_config.toml>"
 max_retry = 1
-timeout = 30
+timeout = 90
 retry_interval = 1
 auth_type = "bearer"
 auth_header_name = "Authorization"
@@ -31,14 +31,14 @@ cache_price_in = 0.1
 visual = true
 force_stream_mode = false
 
-# 后台任务保持非思考，避免推理占满规划、识图或记忆任务的输出预算。
+# 规划、识图与其他辅助任务沿用 high；正式回复使用独立的 max 配置。
 [models.extra_params.reasoning]
-effort = "none"
+effort = "high"
 
 [[models.extra_params.tools]]
 type = "web_search"
 
-# Replyer 复用同一实际模型，但独立设置输出参数，便于与后台任务分别维护。
+# Replyer 复用支持视觉的 Flash，在同一 provider 下独立设置思考强度。
 [[models]]
 name = "deepseek-flash-reply"
 model_identifier = "deepseek-flash"
@@ -51,17 +51,18 @@ visual = true
 force_stream_mode = false
 
 [models.extra_params.reasoning]
-# 原生 Responses 客户端将 extra_params.reasoning 传入请求体；none 避免思考占满 4096 共享预算。
-effort = "none"
+# 原生 Responses 客户端将 extra_params.reasoning 传入请求体。
+effort = "max"
 
 [[models.extra_params.tools]]
 type = "web_search"
 
-# 保持 Replyer 单次输出上限；通过该模型的 reasoning.effort=none 规避共享预算耗尽。
-# 输出预算和重试由原生 Core 处理；其余任务沿用原预算和超时。
+# 推理和正文共享输出上限；任务硬超时覆盖完整生成过程。
+# 其余任务沿用原预算和超时，拍一拍使用 utils 任务。
 [model_task_config.replyer]
 model_list = ["deepseek-flash-reply"]
-max_tokens = 4096
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.planner]
 model_list = ["deepseek-flash"]

@@ -178,8 +178,8 @@ class QQBotPokePlugin(MaiBotPlugin):
             poke_text=f"{display_name}拍了拍你",
             state=observation.state,
         )
-        # model 接受 Host 的任务名；replyer 跟随聊天配置，避免默认选到 embedding 任务。
-        result = await self.ctx.llm.generate(prompt, model="replyer", temperature=0.4, max_tokens=120)
+        # model 接受 Host 的任务名；utils 让短决策沿用辅助模型的思考配置。
+        result = await self.ctx.llm.generate(prompt, model="utils", temperature=0.4, max_tokens=120)
         if not isinstance(result, Mapping) or not result.get("success"):
             raise RuntimeError("拍一拍决策模型调用失败")
         response = str(result.get("response") or result.get("content") or "")
