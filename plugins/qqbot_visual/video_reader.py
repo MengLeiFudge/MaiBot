@@ -33,13 +33,17 @@ from .video_subtitles import read_screen_subtitles
 MAX_BYTES = 80 * 1024 * 1024
 MAX_SECONDS = 600
 TOTAL_TIMEOUT = 180
+DOWNLOAD_TIMEOUT = 90
+DOWNLOAD_ATTEMPTS = 3
 CACHE_SECONDS = 3600
 CACHE_BYTES = 24 * 1024 * 1024
 VIDEO_CAPABILITY = (
     "[本机视频能力] 你可以读取可公开下载的视频链接和QQ视频附件。"
     "本机插件会自动下载视频，并把分镜原图、时间清单和可用字幕附给聊天请求。"
     "用户询问能否看视频时，请说明可发送视频链接或附件，不要笼统声称不支持视频。"
-    "具体内容以实际附入的分镜和字幕为准；下载失败时说明实际原因，不编造画面或声音。"
+    "读取状态以本次请求为准：附有[视频分镜已读取]及对应分镜图时，该视频本次已成功读取，"
+    "取代先前规划或聊天记录中的下载失败、TLS失败判断，请依据本次图片和字幕回答。"
+    "未附入可读画面时说明当前失败原因，不编造画面或声音。"
 )
 VIDEO_DOMAINS = (
     "b23.tv", "bilibili.com", "bili2233.cn", "youtube.com", "youtu.be", "x.com", "twitter.com",
@@ -51,6 +55,10 @@ URL_PATTERN = re.compile(r"https?://[^\s\"'<>，。；）]+", re.IGNORECASE)
 
 class VideoError(RuntimeError):
     """The video could not be read within the plugin's resource limits."""
+
+
+class VideoConnectionError(VideoError):
+    """可在下载预算内重试的临时连接中断。"""
 
 
 @dataclass(frozen=True)
@@ -81,6 +89,7 @@ class VideoOverview:
             f"[视频分镜已读取：{len(self.images)}张图、{self.evidence['cells_total']}格；"
             f"视频总长{self.duration:.2f}秒；字幕来源={self.transcript}]\n"
             f"标题（资料）：{self.title}\n"
+            "本次视频已成功取得并解码，先前下载失败状态已由本结果替代。"
             "下面的分镜图直接来自该视频，按图上格号与清单时间对应。请直接观察图片回答，"
             "不要再因原消息只是链接而声称不能看视频。可以引用时间点说明主体、动作、场景和文字。"
             "这是离散镜头采样，快速动作可能遗漏，最多4张图的预算可能合并镜头。"
@@ -150,6 +159,7 @@ async def _command(arguments: list[str], *, timeout: float, folder: Path | None 
         Standard output of a successful command.
 
     Raises:
+        VideoConnectionError: yt-dlp reported a temporary TLS or connection break.
         VideoError: A tool failed or its workspace exceeded the byte limit.
         TimeoutError: The command exhausted its time budget.
     """
@@ -178,6 +188,10 @@ async def _command(arguments: list[str], *, timeout: float, folder: Path | None 
             name = "yt-dlp" if arguments[1:3] == ["-m", "yt_dlp"] else Path(arguments[0]).stem
             detail = URL_PATTERN.sub("<url>", stderr.decode("utf-8", errors="replace"))[-1200:]
             logging.getLogger(__name__).warning("Video tool failed: tool=%s code=%s detail=%s", name, process.returncode, detail)
+            if name == "yt-dlp" and any(marker in detail for marker in (
+                "SSL_ERROR_SYSCALL", "Connection closed abruptly", "Connection reset by peer",
+            )):
+                raise VideoConnectionError("视频站点连接暂时中断，请稍后重试")
             if "SSL" in detail or "TLS" in detail:
                 raise VideoError("视频站点TLS连接失败，请检查本机代理与站点连通性后重试")
             if "403" in detail or "login" in detail.lower() or "cookies" in detail.lower():
@@ -281,7 +295,19 @@ class VideoReader:
         return result
 
     async def _download(self, source: VideoSource, folder: Path) -> tuple[Path, str, Path | None]:
-        """Download public media, retaining available subtitle and audio tracks."""
+        """取得视频与字幕，在同一预算内重试临时网页下载中断。
+
+        Args:
+            source: 公网地址，或已经调用方验证归属的QQ本机文件。
+            folder: 当前任务隔离的下载及字幕目录。
+
+        Returns:
+            视频路径、来源标题及可选字幕路径。
+
+        Raises:
+            VideoError: 来源无效、不可用或超过资源上限。
+            TimeoutError: 下载未在剩余预算内完成。
+        """
         if source.local_path is not None:
             video = source.local_path.resolve(strict=True)
             if not video.is_file() or video.suffix.lower() not in VIDEO_SUFFIXES:
@@ -326,7 +352,7 @@ class VideoReader:
         bilibili = any(host == domain or host.endswith("." + domain) for domain in ("bilibili.com", "b23.tv", "bili2233.cn"))
         # 本机代理会中断部分B站页面的TLS；同一地址直连可正常完成证书校验。
         proxy = "" if bilibili else proxies.get("https") or proxies.get("http") or ""
-        result = await _command([
+        arguments = [
             sys.executable, "-m", "yt_dlp", "--ignore-config", "--quiet",
             "--no-progress", "--no-simulate", "--encoding", "utf-8", "--no-playlist", "--playlist-items", "1", "--no-cache-dir",
             "--use-extractors", "default,-generic", "--retries", "1", "--fragment-retries", "1",
@@ -340,7 +366,20 @@ class VideoReader:
             "--merge-output-format", "mp4", "--write-subs", "--write-auto-subs",
             "--sub-langs", "zh-Hans,zh-CN,zh,ai-zh,en", "--sub-format", "srt/best", "--convert-subs", "srt",
             "--output", str(folder / "video.%(ext)s"), "--print", "after_move:%(title)j", "--", source.url,
-        ], timeout=90, folder=folder)
+        ]
+        deadline = time.monotonic() + DOWNLOAD_TIMEOUT
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                result = await _command(arguments, timeout=max(0.01, deadline - time.monotonic()), folder=folder)
+                break
+            except VideoConnectionError:
+                delay = 2 * attempt
+                if attempt >= DOWNLOAD_ATTEMPTS or deadline - time.monotonic() <= delay + 1:
+                    raise
+                logging.getLogger(__name__).warning("Video connection interrupted; retrying: attempt=%s delay=%ss", attempt, delay)
+                await asyncio.sleep(delay)
         candidates = [p for p in folder.glob("video.*") if p.suffix.lower() in VIDEO_SUFFIXES]
         if not candidates:
             raise VideoError("没有下载到视频；可能超过10分钟或80 MiB上限，或链接需要登录")

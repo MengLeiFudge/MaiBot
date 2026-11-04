@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-visual",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "name": "QQBot 定向看图",
   "description": "门控群聊图片和本地表情，提取视频分镜与画面字幕，支持QQ合并转发视频。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
