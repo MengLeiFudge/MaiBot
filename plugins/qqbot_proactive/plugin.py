@@ -167,7 +167,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
         while True:
             await asyncio.sleep(15)
             try:
-                async with asyncio.timeout(40):
+                async with asyncio.timeout(90):
                     await self._check_private()
             except Exception as exc:
                 self.ctx.logger.warning("主动私聊检查失败，本次保持静默: error_type=%s", type(exc).__name__)
@@ -355,11 +355,11 @@ class QQBotProactivePlugin(MaiBotPlugin):
             "topics": [asdict(topic) for topic in state.topics],
             "messages": messages,
         }
-        async with asyncio.timeout(25):
+        async with asyncio.timeout(60):
             result = await self.ctx.llm.generate(
                 prompt=[{"role": "system", "content": FOLLOWUP_PROMPT},
                         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
-                model="planner", temperature=0.3, max_tokens=1600,
+                model="planner", temperature=0.3, max_tokens=8192,
             )
         response = result.get("response")
         if result.get("success") is not True or not isinstance(response, str):

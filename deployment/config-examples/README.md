@@ -30,6 +30,6 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `qqbot_identity` 向 Planner 注入身份规则，当前 Core 的 Context Items 没有结构化发送者，Planner 身份保持未知；Replyer 按实际目标消息 ID 查询同会话发送者并注入 `platform/user_id/is_owner`。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见两个插件的 README。
 
-`provider.example.toml` 保持 Replyer 输出上限 4096，通过其独立模型配置 `reasoning.effort = "none"` 避免思考耗尽共享预算；其余任务及超时保持现有配置。
+`provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 120 秒。蓝铃本机保留原有任务模型分配；拍一拍与主动续聊判断也提供相同输出余量。接话条件、规划轮数、主动联系间隔和重试策略沿用现有配置。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
 
 蓝铃所有群和私聊的长期记忆配置见 `lanling-identity.example.toml` 的 `a_memorix` 部分：关闭顶层聊天准入过滤，启用聊天摘要自动写回。原生消息窗口阈值与摘要上下文长度均为 36；达到窗口后异步生成并存储摘要，检索通过原生 `query_memory`。这不代表逐句永久保存，也不保证开启后立即记起过去的全部聊天；现有历史是否纳入首次摘要由原生窗口决定，不执行额外批量回填。全局记忆共享、群到私聊及私聊到群的跨会话召回保持关闭，各会话在自己的范围读写记忆。嵌套 `filter.retrieval` 只限制跨会话检索，不改变本会话访问。

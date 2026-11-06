@@ -8,7 +8,7 @@ client_type = "openai_responses"
 base_url = "https://api.deepseek.com"
 api_key = "<set-only-in-config/model_config.toml>"
 max_retry = 1
-timeout = 30
+timeout = 120
 retry_interval = 1
 auth_type = "bearer"
 auth_header_name = "Authorization"
@@ -31,14 +31,14 @@ cache_price_in = 0.1
 visual = true
 force_stream_mode = false
 
-# 后台任务保持非思考，避免推理占满规划、识图或记忆任务的输出预算。
+# 规划、回复、识图与其他文本辅助任务统一使用 max 思考。
 [models.extra_params.reasoning]
-effort = "none"
+effort = "max"
 
 [[models.extra_params.tools]]
 type = "web_search"
 
-# Replyer 复用同一实际模型，但独立设置输出参数，便于与后台任务分别维护。
+# Replyer 可使用独立模型名，复用同一支持视觉的 Flash 与 provider。
 [[models]]
 name = "deepseek-flash-reply"
 model_identifier = "deepseek-flash"
@@ -51,38 +51,55 @@ visual = true
 force_stream_mode = false
 
 [models.extra_params.reasoning]
-# 原生 Responses 客户端将 extra_params.reasoning 传入请求体；none 避免思考占满 4096 共享预算。
-effort = "none"
+# 原生 Responses 客户端将 extra_params.reasoning 传入请求体。
+effort = "max"
 
 [[models.extra_params.tools]]
 type = "web_search"
 
-# 保持 Replyer 单次输出上限；通过该模型的 reasoning.effort=none 规避共享预算耗尽。
-# 输出预算和重试由原生 Core 处理；其余任务沿用原预算和超时。
+# 推理和正文共享输出上限，任务硬超时覆盖完整生成过程。
+# 蓝铃本机可以保留原有任务模型分配。
 [model_task_config.replyer]
 model_list = ["deepseek-flash-reply"]
-max_tokens = 4096
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.planner]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.memory]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.mid_memory]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.utils]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.learner]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.expression_use]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.emoji]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.vlm]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
