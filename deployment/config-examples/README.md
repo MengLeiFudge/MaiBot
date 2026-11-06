@@ -26,4 +26,4 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `qqbot_identity` 向 Planner 注入身份规则，当前 Core 的 Context Items 没有结构化发送者，Planner 身份保持未知；Replyer 按实际目标消息 ID 查询同会话发送者并注入 `platform/user_id/is_owner`。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见两个插件的 README。
 
-`provider.example.toml` 为正式 Replyer 配置独立的 `deepseek-flash-reply`：实际模型仍是支持视觉的 `deepseek-flash`，`reasoning.effort = "max"`，推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 90 秒。Planner 与其他辅助任务沿用基础 Flash 的 `high` 思考及原有预算；拍一拍使用 `utils` 任务。输出上限不代表固定消耗量，思考档位可能影响延迟和费用，按正常聊天后的实际账单调整。
+`provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 90 秒；拍一拍使用 `utils` 任务并提供相同输出余量。接话条件、规划轮数和重试策略沿用现有配置。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。

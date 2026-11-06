@@ -31,14 +31,14 @@ cache_price_in = 0.1
 visual = true
 force_stream_mode = false
 
-# 规划、识图与其他辅助任务沿用 high；正式回复使用独立的 max 配置。
+# 规划、回复、识图与其他文本辅助任务统一使用 max 思考。
 [models.extra_params.reasoning]
-effort = "high"
+effort = "max"
 
 [[models.extra_params.tools]]
 type = "web_search"
 
-# Replyer 复用支持视觉的 Flash，在同一 provider 下独立设置思考强度。
+# Replyer 保留独立模型名，复用同一支持视觉的 Flash 与 provider。
 [[models]]
 name = "deepseek-flash-reply"
 model_identifier = "deepseek-flash"
@@ -58,7 +58,7 @@ effort = "max"
 type = "web_search"
 
 # 推理和正文共享输出上限；任务硬超时覆盖完整生成过程。
-# 其余任务沿用原预算和超时，拍一拍使用 utils 任务。
+# 文本与视觉任务共享相同上限，拍一拍使用 utils 任务。
 [model_task_config.replyer]
 model_list = ["deepseek-flash-reply"]
 max_tokens = 8192
@@ -66,24 +66,40 @@ hard_timeout = 60
 
 [model_task_config.planner]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.memory]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.mid_memory]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.utils]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.learner]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.expression_use]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.emoji]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60
 
 [model_task_config.vlm]
 model_list = ["deepseek-flash"]
+max_tokens = 8192
+hard_timeout = 60

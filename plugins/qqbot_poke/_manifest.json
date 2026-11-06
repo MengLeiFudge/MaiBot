@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-poke",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "name": "QQBot 戳一戳",
   "description": "MaiBot 原生拍一拍状态机、受控反拍和短时禁言插件。",
   "author": {
