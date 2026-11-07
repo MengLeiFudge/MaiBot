@@ -1,4 +1,4 @@
-"""蓝铃的本机文件操作；所有变更集中检查固定工作区边界。"""
+"""蓝铃的本机文件操作；个人工作区与蓝铃项目目录均可读写。"""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import uuid
 
 
 WORKSPACE_ROOT = Path("D:/project/lanling")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MAX_TEXT_BYTES = 4 * 1024 * 1024
 MAX_WRITE_BYTES = 256 * 1024
 MAX_COPY_BYTES = 80 * 1024 * 1024
@@ -24,21 +25,25 @@ _RESERVED_NAME = re.compile(r"^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]|
 
 
 class Workspace:
-    """提供本地读取和工作区内变更；调用方须串行调用并先核验所属会话。"""
+    """提供本地读取及两处目录的完整文件变更；调用方先授权并串行调用。"""
 
     def __init__(self) -> None:
         """仅在实际运行机器的 Windows 路径语义下启用文件工具。"""
         if os.name != "nt":
             raise RuntimeError("蓝铃工作区文件工具需要在 Windows 中运行。")
         self.root = WORKSPACE_ROOT
-        self._reject_reparse(self.root)
-        if not self.root.is_dir():
-            raise ValueError(f"工作区不存在：{self.root}，请先创建该目录。")
+        self.write_roots = (self.root, PROJECT_ROOT)
+        for root in self.write_roots:
+            self._reject_reparse(root)
+            if not root.is_dir():
+                raise ValueError(f"可写目录不存在：{root}，请先创建该目录。")
 
     def _local_path(self, value: str) -> Path:
-        """相对路径以工作区为基准，拒绝设备、UNC、ADS 和 Windows 歧义名称。"""
+        """相对路径从个人工作区解释，支持 WSL 盘符路径，拒绝 Windows 特殊路径。"""
         if not isinstance(value, str) or not value or len(value) > 2048:
             raise ValueError("路径必须是 1–2048 个字符的本地路径。")
+        if mounted := re.match(r"^/mnt/([A-Za-z])(?:/|$)", value):
+            value = f"{mounted.group(1).upper()}:/{value[mounted.end():]}"
         windows = PureWindowsPath(value)
         if windows.drive and (len(windows.drive) != 2 or windows.drive[1] != ":" or not windows.drive[0].isascii() or not windows.drive[0].isalpha()):
             raise ValueError("仅支持本地盘符路径，不支持 UNC 或设备路径。")
@@ -66,13 +71,14 @@ class Workspace:
                 raise ValueError(f"写入路径经过链接或重解析点，已拒绝：{item}")
 
     def _write_path(self, value: str) -> Path:
-        """同时核对规范化路径及实际解析路径，工作区本身也不能变成联接。"""
+        """两处根目录内不按文件用途限制写入；链接不得把目标转到其他目录。"""
         path = self._local_path(value)
-        if not path.is_relative_to(self.root):
-            raise ValueError(f"写入只能发生在 {self.root} 内。")
+        if not any(path.is_relative_to(root) for root in self.write_roots):
+            raise ValueError("写入只能发生在个人工作区或蓝铃项目目录内：" + "、".join(map(str, self.write_roots)))
         self._reject_reparse(path)
-        if not path.resolve().is_relative_to(self.root.resolve(strict=True)):
-            raise ValueError("实际写入位置超出工作区，已拒绝。")
+        resolved = path.resolve()
+        if not any(resolved.is_relative_to(root.resolve(strict=True)) for root in self.write_roots):
+            raise ValueError("实际写入位置超出已开放的两处目录，已拒绝。")
         return path
 
     def _read_path(self, value: str) -> Path:
@@ -180,7 +186,7 @@ class Workspace:
         return {"path": str(target), "bytes": len(data), "sha256": sha256(data).hexdigest()}
 
     def _copy_file(self, source: Path, target: Path) -> dict[str, Any]:
-        """只读取得外部资料，分块复制到工作区，再以不覆盖方式提交目标。"""
+        """只读取得来源文件，分块复制到可写目录，再以不覆盖方式提交目标。"""
         if not source.is_file() or source.stat().st_size > MAX_COPY_BYTES:
             raise ValueError("复制来源必须是不超过 80 MiB 的普通文件。")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -210,7 +216,7 @@ class Workspace:
         return {"path": str(target), "bytes": total, "sha256": digest.hexdigest()}
 
     def manage(self, action: str, path: str, destination: str) -> dict[str, Any]:
-        """创建目录、复制资料，或在工作区内移动/归档；不递归删除文件。"""
+        """管理两处目录的文件；归档统一进入个人工作区 .trash，保留恢复路径。"""
         if action not in ("mkdir", "copy", "move", "trash"):
             raise ValueError("action 只能是 mkdir、copy、move 或 trash。")
         if action == "mkdir":
@@ -222,14 +228,14 @@ class Workspace:
             source = self._read_path(path)
         else:
             source = self._write_path(path)
-            if source == self.root:
-                raise ValueError("不能移动或归档工作区根目录。")
+            if source in self.write_roots:
+                raise ValueError("不能移动或归档已授权的根目录。")
             source.stat()
         if action == "trash":
             destination = str(self.root / ".trash" / uuid.uuid4().hex / source.name)
         target = self._write_path(destination)
-        if target == self.root or target.exists():
-            raise ValueError("目标已存在，请指定新的工作区内路径。")
+        if target in self.write_roots or target.exists():
+            raise ValueError("目标已存在，请指定个人工作区或蓝铃项目内的新路径。")
         if action == "copy":
             return self._copy_file(source, target)
         if target.is_relative_to(source):

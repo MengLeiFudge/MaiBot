@@ -26,7 +26,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 蓝铃的私聊主动续聊配置见 [qqbot_proactive](../../plugins/qqbot_proactive/README.md)。主人身份复用本机身份插件配置，主动次数状态保存在该插件的标准数据目录。
 
-蓝铃的个人工作区和文件工具配置见 [qqbot_workspace](../../plugins/qqbot_workspace/README.md)。工作区固定为 `D:\project\lanling`，工作区外只读；文件工具绑定已有主人私聊的真实会话，模型无权通过工具参数扩大写入位置。
+蓝铃的个人工作区和文件工具配置见 [qqbot_workspace](../../plugins/qqbot_workspace/README.md)。`D:\project\lanling` 与整个 `D:\project\qqbot\maibot-lanling` 项目目录均可读写，项目内不按文件或配置字段另设授权；其他本机位置只读。文件工具绑定已有主人私聊的真实会话，项目文件的具体使用由提示词和主人后续指引约束。
 
 蓝铃的私聊规划漏执行检查见 [qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md)，用于核对只有分析而没有调用 `reply` 的待回复消息。
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-workspace",
-  "version": "0.1.0",
-  "name": "蓝铃个人工作区",
-  "description": "为主人私聊提供本机只读访问及 D:/project/lanling 内的文件整理与笔记保存。",
+  "version": "0.2.0",
+  "name": "蓝铃工作区与项目文件",
+  "description": "为主人私聊提供本机只读访问、个人工作区和蓝铃完整项目的文件读写。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {
