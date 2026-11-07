@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-workspace",
+  "version": "0.1.0",
+  "name": "蓝铃个人工作区",
+  "description": "为主人私聊提供本机只读访问及 D:/project/lanling 内的文件整理与笔记保存。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [{"type": "plugin", "id": "mlj.qqbot-identity", "version_spec": ">=0.1.0,<0.2.0"}],
+  "capabilities": ["config.get", "config.get_plugin", "chat.get_stream_by_user_id"],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}
