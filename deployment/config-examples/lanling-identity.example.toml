@@ -27,6 +27,7 @@ host = ["127.0.0.1", "::1"]
 port = 8004
 
 # 所有会话可在自己的范围读写记忆，不开启跨会话共享。
+# 启用人物事实、聊天摘要、启发式召回和 Episode，允许蓝铃持续积累长期经验。
 [a_memorix]
 global_memory_sharing_enabled = false
 
@@ -34,9 +35,20 @@ global_memory_sharing_enabled = false
 enabled = false
 
 [a_memorix.integration]
+enable_memory_query_tool = true
+memory_query_default_limit = 5
+enable_person_profile_query_tool = true
+enable_person_profile_injection = true
+heuristic_memory_recall_enabled = true
+heuristic_memory_recall_min_new_messages = 12
+person_fact_writeback_enabled = true
 chat_summary_writeback_enabled = true
-chat_summary_writeback_message_threshold = 36
+chat_summary_writeback_message_threshold = 12
 chat_summary_writeback_context_length = 36
 heuristic_memory_cross_chat_enabled = false
 heuristic_memory_group_to_private_enabled = false
 heuristic_memory_private_to_group_enabled = false
+
+[a_memorix.episode]
+enabled = true
+generation_enabled = true
