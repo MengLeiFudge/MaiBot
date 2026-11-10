@@ -30,7 +30,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 蓝铃的私聊规划漏执行检查见 [qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md)，用于核对只有分析而没有调用 `reply` 的待回复消息。
 
-`qqbot_identity` 向 Planner 注入身份规则，当前 Core 的 Context Items 没有结构化发送者，Planner 身份保持未知；Replyer 按实际目标消息 ID 查询同会话发送者并注入 `platform/user_id/is_owner`。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见两个插件的 README。
+`qqbot_identity` 从同会话消息 API 读取真实发送者，为 Planner 中已经出现的消息补充身份表，Replyer 则按实际目标消息 ID 查询并注入 `platform/user_id/is_owner`。只有已核验的主人使用“主人”称呼，其他人和未知身份使用昵称或“你”；本机回复风格不得把所有第二人称替换成“主人”。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见 [qqbot_identity](../../plugins/qqbot_identity/README.md)。
 
 `provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 120 秒。蓝铃本机保留原有任务模型分配；拍一拍与主动续聊判断也提供相同输出余量。接话条件、规划轮数、主动联系间隔和重试策略沿用现有配置。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
 
