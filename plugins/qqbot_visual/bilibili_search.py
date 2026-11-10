@@ -54,6 +54,11 @@ class BilibiliVideoResult:
         }
 
 
+def _canonical_bvid(value: str) -> str:
+    """只规范 BV 前缀，保留正文的大小写；BVID 正文区分大小写。"""
+    return "BV" + value[2:]
+
+
 def normalize_bilibili_reference(reference: str) -> str:
     """把裸 BV 号变成可交给 yt-dlp 的 B站页面 URL。"""
     normalized = html.unescape(reference.replace("\\/", "/")).strip()
@@ -61,7 +66,7 @@ def normalize_bilibili_reference(reference: str) -> str:
         raise BilibiliSearchError("B站视频地址不能为空，请提供视频链接或 BV 号")
     match = _BVID_PATTERN.fullmatch(normalized)
     if match is not None:
-        return f"https://www.bilibili.com/video/{match.group(0).upper()}"
+        return f"https://www.bilibili.com/video/{_canonical_bvid(match.group(0))}"
     return normalized
 
 
@@ -115,7 +120,7 @@ def _result_from_payload(item: Any) -> BilibiliVideoResult | None:
         if match is None:
             return None
         bvid = match.group(0)
-    bvid = bvid.upper()
+    bvid = _canonical_bvid(bvid)
     return BilibiliVideoResult(
         bvid=bvid,
         title=_clean_text(item.get("title"), limit=160) or bvid,
