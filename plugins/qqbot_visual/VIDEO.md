@@ -15,10 +15,17 @@ video_enabled = true
 
 [plugin]
 enabled = true
-config_version = "0.1.0"
+config_version = "0.2.0"
 ```
 
 Planner 和 Replyer 使用的主聊天模型须开启且实际支持 `visual`。既有 `[visual]` 的 `text` 模式不影响请求 Hook 补入的图片。视频不额外调用 `vlm` 生成摘要。
+
+## B站搜索与阅读
+
+蓝铃的主人私聊可以通过 `tool_search` 找到两个本地工具：
+- `bilibili_search`：调用 B站公开搜索接口，返回清理过的标题、作者、时长、简介、BV号和页面 URL；结果只是候选资料。
+- `bilibili_watch`：接收候选 URL 或 BV号，复用本插件的 yt-dlp 下载、字幕/OCR 和 DSH Video Storyboard 分镜链，把最多4张真实 PNG 分镜作为工具媒体交给主模型。
+工具只允许蓝铃已绑定的主人私聊，执行时还会核对身份插件和真实会话；群聊、其他私聊或无法核验身份时拒绝。搜索接口与现有B站下载一样不使用本机代理。只有 `bilibili_watch` 成功返回分镜图时才可描述视频画面；标题、简介或下载失败文本不构成观看证据。
 
 ## 处理边界
 

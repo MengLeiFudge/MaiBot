@@ -1,5 +1,11 @@
 video_enabled = true
 
+[bilibili]
+enabled = true
+search_enabled = true
+watch_enabled = true
+max_search_results = 5
+
 [plugin]
 enabled = true
-config_version = "0.1.0"
+config_version = "0.2.0"

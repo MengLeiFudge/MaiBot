@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-visual",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "name": "QQBot 定向看图",
-  "description": "读取私聊与群聊定向引用图，提取视频分镜和画面字幕，支持QQ合并转发视频。",
+  "description": "读取私聊与群聊定向引用图，搜索并阅读B站视频，提取视频分镜和画面字幕，支持QQ合并转发视频。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {
@@ -19,9 +19,10 @@
     {"type": "python_package", "name": "yt-dlp", "version_spec": ">=2026.10.26"},
     {"type": "python_package", "name": "curl_cffi", "version_spec": ">=0.13,<0.17"},
     {"type": "python_package", "name": "ffmpeg-binaries", "version_spec": "==1.1.0"},
-    {"type": "plugin", "id": "maibot-team.napcat-adapter", "version_spec": ">=1.3.4,<2.0.0"}
+    {"type": "plugin", "id": "maibot-team.napcat-adapter", "version_spec": ">=1.3.4,<2.0.0"},
+    {"type": "plugin", "id": "mlj.qqbot-identity", "version_spec": ">=0.1.0,<0.2.0"}
   ],
-  "capabilities": ["config.get", "message.get_by_id", "message.get_recent", "api.call"],
+  "capabilities": ["config.get", "config.get_plugin", "chat.get_stream_by_user_id", "message.get_by_id", "message.get_recent", "api.call"],
   "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
   "plugin_type": "extension"
 }

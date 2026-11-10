@@ -2,7 +2,9 @@
 
 `qqbot_visual` 使用 MaiBot 1.2.3 的公开 SDK/Hook：接收阶段门控群聊媒体，在 Planner 和 Replyer 请求前补充私聊附件及群聊定向消息引用的原图。视频分镜原图直接附给主聊天模型，使用说明见 [视频分镜](VIDEO.md)。
 
-将 `config.example.toml` 复制为本机 `config.toml` 并启用。本人 QQ、昵称、别名和表情收集开关通过 `config.get` 读取 `bot.qq_account/nickname/alias_names` 与 `emoji.steal_emoji`，跟随 bot 配置热重载。定向消息包括私聊、群聊中的本人真实 @、适配器 `at_bot`、回复本人，以及当前顶层正文含昵称或别名；机器人自己的发言排除。转发、引用正文和图片描述中的名字不参与呼叫判定。
+在蓝铃已配置的主人私聊中，模型还可以通过 `tool_search` 找到 `bilibili_search` 和 `bilibili_watch`：前者调用 B站公开搜索接口返回候选，后者复用同一套 yt-dlp、字幕/OCR 和 DSH 分镜链，把真实分镜 PNG 作为工具媒体交给主模型。搜索结果、标题和简介都只是外部资料；未取得分镜图时不能声称已经看过。工具固定为私聊范围，并在执行时再次核对身份插件中的主人 QQ 与真实会话。
+
+将 `config.example.toml` 复制为本机 `config.toml` 并启用。`[bilibili]` 默认开启搜索和视频阅读，`max_search_results` 控制单次候选数量。本人 QQ、昵称、别名和表情收集开关通过 `config.get` 读取 `bot.qq_account/nickname/alias_names` 与 `emoji.steal_emoji`，跟随 bot 配置热重载。定向消息包括私聊、群聊中的本人真实 @、适配器 `at_bot`、回复本人，以及当前顶层正文含昵称或别名；机器人自己的发言排除。转发、引用正文和图片描述中的名字不参与呼叫判定。
 
 非定向普通图片保留已有描述，缺描述时写 `[图片]`，移除 `binary_data_base64`，保留组件 hash 和其余路由、发送者、时间及文本。转发中的媒体递归处理。原生组件遇到非空 content 会跳过 VLM 和保存，因此普通新群图不保证进入媒体文件缓存。设置 `emoji.steal_emoji = true` 后，表情组件保留原始数据与二进制，进入原生表情描述、缓存和本地注册链；关闭该开关时，非定向表情沿用占位策略。注册数量、检查间隔、单图大小和替换规则沿用 `[emoji]` 配置。
 
