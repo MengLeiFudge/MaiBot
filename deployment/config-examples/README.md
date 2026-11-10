@@ -24,7 +24,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `qqbot_visual` 在接收 Hook 中门控非定向普通图片；定向附件沿用原生识图，接收阶段的引用只补充同会话已有描述。设置 `emoji.steal_emoji = true`，保留表情组件的原始数据以进入原生本地表情收集链。蓝铃私聊另在 Planner 和 Replyer 请求 Hook 中直接补入同会话图片及表情图像，动态表情抽取代表帧，也支持普通引用中的原图，详见 [qqbot_visual](../../plugins/qqbot_visual/README.md)。保持 `[visual].planner_mode = "text"`、`replyer_mode = "text"` 和 `wait_image_recognize_max_time = 15.0`；仅蓝铃私聊通过插件补图，群聊普通图片仍走原有策略。框架内部对已发图、工具结果图启动的识图任务没有接收 Hook，插件不能拦截。
 
-蓝铃的私聊主动续聊配置见 [qqbot_proactive](../../plugins/qqbot_proactive/README.md)。主人身份复用本机身份插件配置，主动次数状态保存在该插件的标准数据目录。
+蓝铃的共享自身状态和私聊主动续聊配置见 [qqbot_proactive](../../plugins/qqbot_proactive/README.md)。活动、心情和休息期限由同一份持久状态提供给所有私聊与群聊；休息时暂停主动联系，并在 QQ 发送前拦截其他会话发言。状态工具成功后才生效，发起会话保留短暂告别窗口，到期或明确醒来后恢复。共享摘要只包含机器人自身状态，各会话的聊天原文和长期记忆仍按原范围保存。主人身份复用本机身份插件配置，两类状态分别保存在该插件标准数据目录的 `self_state.json` 与 `schedule.json`。
 
 蓝铃的个人工作区和文件工具配置见 [qqbot_workspace](../../plugins/qqbot_workspace/README.md)。`D:\project\lanling` 与整个 `D:\project\qqbot\maibot-lanling` 项目目录均可读写，项目内不按文件或配置字段另设授权；其他本机位置只读。文件工具绑定已有主人私聊的真实会话，项目文件的具体使用由提示词和主人后续指引约束。
 

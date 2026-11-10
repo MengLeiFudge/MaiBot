@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-proactive",
-  "version": "0.3.1",
-  "name": "QQBot 私聊主动续聊",
-  "description": "为主人私聊安排一次后续联系，按话题选择检查时机，通过原生 Maisaka 自然续聊。",
+  "version": "0.4.0",
+  "name": "QQBot 自身状态与主动续聊",
+  "description": "在全部会话保持一致的自身活动和休息状态，并为主人私聊安排自然续聊。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {

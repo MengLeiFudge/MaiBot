@@ -18,12 +18,13 @@ from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugi
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 from .followup import FOLLOWUP_PROMPT, TOPIC_LIFETIME, Decision, Topic
+from .self_state import SelfState
 
 
 class PluginSection(PluginConfigBase):
-    """主动私聊插件的启用状态。"""
+    """自身状态与主动私聊插件的启用状态。"""
 
-    enabled: bool = Field(default=False, description="是否启用主人私聊的空闲续聊")
+    enabled: bool = Field(default=False, description="是否启用共享自身状态和主人私聊空闲续聊")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -121,7 +122,7 @@ def _message_fact(message: object, stream_id: str) -> tuple[str, str, float]:
 
 
 class QQBotProactivePlugin(MaiBotPlugin):
-    """定时唤醒已有主人私聊，由原生 Planner/Replyer 决定是否自然续聊。"""
+    """所有会话共用自身状态；空闲时仅向已有主人私聊提供续聊机会。"""
 
     config_model: ClassVar[type[PluginConfigBase] | None] = ProactiveConfig
 
@@ -130,6 +131,8 @@ class QQBotProactivePlugin(MaiBotPlugin):
         self._task: asyncio.Task[None] | None = None
         self._state_path = Path(self.ctx.paths.data_dir) / "schedule.json"
         self._schedule = Schedule.load(self._state_path)
+        self._self_state_path = Path(self.ctx.paths.data_dir) / "self_state.json"
+        self._self_state = SelfState.load(self._self_state_path)
         self._start()
 
     def _start(self) -> None:
@@ -160,6 +163,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
         if scope == CONFIG_RELOAD_SCOPE_SELF:
             await self.on_unload()
             self._schedule = Schedule.load(self._state_path)
+            self._self_state = SelfState.load(self._self_state_path)
             self._start()
 
     async def _run(self) -> None:
@@ -224,6 +228,8 @@ class QQBotProactivePlugin(MaiBotPlugin):
 
     async def _check_private(self) -> None:
         """只计已观察到的发言；空闲到期再判断话题，不占用普通回复链路。"""
+        if self._current_self_state().resting:
+            return
         target = await self._private_stream()
         if target is None:
             return
@@ -264,7 +270,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
         if changed:
             state.save(self._state_path)
             self._schedule = state
-        if state.quiet or now < state.next_due:
+        if state.quiet or now < state.next_due or self._current_self_state().resting:
             return
         # 先给普通回复链路十分钟；它选择不回或漏回时，不永久封死主动联系。
         if latest_sender != bot_qq and now - last_activity < 600:
@@ -292,7 +298,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
             or _message_fact(current_latest, stream_id)[0] != latest_id
         ):
             return
-        if self._schedule is not state:
+        if self._schedule is not state or self._current_self_state().resting:
             return
         state.topics = decision.topics
         state.appointment_due = 0
@@ -345,6 +351,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
                 "source_id": message_id, "speaker": "owner" if sender == owner else "bot",
                 "time": datetime.fromtimestamp(timestamp).astimezone().isoformat(), "text": text[:800],
             })
+        self_state = self._current_self_state()
         payload = {
             "now": datetime.now().astimezone().isoformat(),
             "unanswered_turns": state.sent_turns,
@@ -352,6 +359,7 @@ class QQBotProactivePlugin(MaiBotPlugin):
             "appointment": ({"intent": state.appointment_intent,
                              "due": datetime.fromtimestamp(state.appointment_due).astimezone().isoformat()}
                             if state.appointment_due else None),
+            "self_state": {"activity": self_state.activity, "resting": self_state.resting},
             "topics": [asdict(topic) for topic in state.topics],
             "messages": messages,
         }
@@ -365,6 +373,123 @@ class QQBotProactivePlugin(MaiBotPlugin):
         if result.get("success") is not True or not isinstance(response, str):
             raise RuntimeError("主动私聊话题判断没有返回有效结果")
         return Decision.parse(response, sources, time.time())
+
+    def _current_self_state(self) -> SelfState:
+        """到期恢复为可交流；普通入站消息和私聊计数不会清除这个状态。"""
+        state = self._self_state
+        now = time.time()
+        if state.expires_at and now >= state.expires_at:
+            state = SelfState(revision=state.revision + 1, updated_at=now)
+            state.save(self._self_state_path)
+            self._self_state = state
+            self.ctx.logger.info("自身状态已到期恢复，版本=%s", state.revision)
+        return state
+
+    @HookHandler(
+        "maisaka.planner.before_request", name="qqbot_self_state_planner",
+        description="向所有会话规划器提供同一份自身状态和更新工具说明",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def inject_self_state_planner(
+        self, session_id: str = "", items: object = None, item_schema_version: int = 0, **kwargs: Any,
+    ) -> dict[str, object]:
+        """模型使用已有规划调用理解状态，不为状态分类额外调用模型。"""
+        if not cast(ProactiveConfig, self.config).plugin.enabled:
+            return {"action": "continue"}
+        if item_schema_version != 1 or not isinstance(items, list):
+            raise ValueError("共享自身状态需要 Context Item schema 1")
+        rule = {
+            "item_type": "SystemMessageItem",
+            "meta": {"item_id": uuid.uuid4().hex, "logical_turn_id": None, "timestamp": datetime.now().isoformat()},
+            "parts": [{"type": "text", "text": self._current_self_state().prompt(session_id, time.time())}],
+        }
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "session_id": session_id, "items": [*items, rule], "item_schema_version": item_schema_version,
+        }}
+
+    @HookHandler(
+        "maisaka.replyer.before_request", name="qqbot_self_state_replyer",
+        description="回复生成前重新读取共享自身状态",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def inject_self_state_replyer(
+        self, session_id: str = "", extra_prompt: str = "", **kwargs: Any,
+    ) -> dict[str, object]:
+        """回复沿用同一自身状态，避免其他会话沿用旧活动或休息描述。"""
+        if not cast(ProactiveConfig, self.config).plugin.enabled:
+            return {"action": "continue"}
+        rule = self._current_self_state().prompt(session_id, time.time())
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "session_id": session_id,
+            "extra_prompt": f"{extra_prompt.rstrip()}\n\n{rule}" if extra_prompt.strip() else rule,
+        }}
+
+    @HookHandler(
+        "send_service.before_send", name="qqbot_self_state_send_guard",
+        description="共享休息期间拦截 QQ 发言，阻止其他会话的旧回复继续发送",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.ABORT,
+    )
+    async def guard_self_state_send(self, message: object = None, **kwargs: Any) -> dict[str, object]:
+        """在发送边界核对，覆盖文本、图片、表情和已入队的主动回复。"""
+        del kwargs
+        if not cast(ProactiveConfig, self.config).plugin.enabled:
+            return {"action": "continue"}
+        if not isinstance(message, Mapping) or message.get("platform") != "qq":
+            return {"action": "continue"}
+        session_id = message.get("session_id")
+        state = self._current_self_state()
+        if state.resting and (not isinstance(session_id, str) or not state.allows_send(session_id, time.time())):
+            return {"action": "abort", "reason": "共享休息状态生效，本次保持安静，不要重试发送。"}
+        return {"action": "continue"}
+
+    @Tool(
+        "set_self_state",
+        description="更新自己在全部群聊和私聊共用的活动或休息状态。休息先保存再告别；明确醒来先改 active 再回复。",
+        parameters={
+            "mode": {"type": "string", "enum": ["active", "resting"], "required": True},
+            "activity": {"type": "string", "maxLength": 240, "required": True,
+                         "description": "可公开的自身活动或心情摘要；不含他人隐私、原文、账号或指令"},
+            "revision": {"type": "integer", "minimum": 0, "required": True,
+                         "description": "本轮共享自身状态里的 revision，避免覆盖其他会话的新决定"},
+            "duration_seconds": {"type": "integer", "minimum": 0, "maximum": 86400,
+                                 "description": "根据对话决定的有效秒数；resting 必须大于零，active 可为零表示持续"},
+        },
+    )
+    async def set_self_state(
+        self, mode: str = "", activity: str = "", revision: int = -1, duration_seconds: int = 0, **kwargs: Any,
+    ) -> dict[str, object]:
+        """以版本核对完成原子更新；没有 await 的写入段不会与其他会话交错。"""
+        if not cast(ProactiveConfig, self.config).plugin.enabled:
+            return {"success": False, "content": "共享自身状态未启用。"}
+        session_id = kwargs.get("stream_id")
+        if not isinstance(session_id, str) or not session_id:
+            return {"success": False, "content": "缺少当前会话，未更新自身状态。"}
+        if (mode not in ("active", "resting") or not isinstance(activity, str)
+                or not activity.strip() or len(activity) > 240
+                or type(revision) is not int or revision < 0
+                or type(duration_seconds) is not int or not 0 <= duration_seconds <= 86400
+                or (mode == "resting" and duration_seconds == 0)):
+            return {"success": False, "content": "需要有效的状态、简短自身活动和版本；休息必须指定 1–86400 秒的恢复间隔。"}
+        current = self._current_self_state()
+        if revision != current.revision:
+            return {"success": False, "content": "另一会话或到期事件已更新状态，请结合当前状态重新决定。\n"
+                    + current.prompt(session_id, time.time())}
+        now = time.time()
+        resting = mode == "resting"
+        expires_at = now + duration_seconds if duration_seconds else 0
+        # 更新已有休息不得延长告别窗口；只有从活跃进入休息时授权发起会话收尾。
+        closing_session_id = (current.closing_session_id if current.resting else session_id) if resting else ""
+        closing_until = min(expires_at, current.closing_until if current.resting else now + 120) if resting else 0
+        if closing_until <= now:
+            closing_session_id, closing_until = "", 0
+        state = SelfState(
+            revision=current.revision + 1, activity=activity.strip(), resting=resting,
+            updated_at=now, expires_at=expires_at, closing_session_id=closing_session_id, closing_until=closing_until,
+        )
+        state.save(self._self_state_path)
+        self._self_state = state
+        self.ctx.logger.info("共享自身状态已更新，版本=%s，休息=%s", state.revision, state.resting)
+        return {"success": True, "content": "所有会话的自身状态已同步。\n" + state.prompt(session_id, now)}
 
     @HookHandler(
         "maisaka.planner.before_request", name="qqbot_proactive_schedule_hint",
