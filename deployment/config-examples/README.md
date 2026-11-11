@@ -12,7 +12,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 启动前还要确认：
 
 - 夜凛 `plugins/napcat_adapter/config.toml` 使用 `127.0.0.1:6201` 和 `connection_id = "yelin"`；蓝铃使用 `127.0.0.1:6204` 和 `connection_id = "lanling"`。按 `napcat-adapter.example.toml` 配置全局禁止发送者名单，包含另外四个机器人账号。该名单先于私聊/群聊名单开关执行，不依赖业务插件。
-- `plugins/qqbot_poke/config.toml`、`plugins/qqbot_knowledge/config.toml`、`plugins/qqbot_identity/config.toml` 和 `plugins/qqbot_visual/config.toml` 的顶层 `plugin.enabled` 为 `true`。知识插件通过 `127.0.0.1:8081` 使用云栖的共享 DSP 向量检索服务；身份插件在本机 `[identity].owner_qq` 填写真正主人 QQ，示例保持留空。
+- `plugins/qqbot_poke/config.toml`、`plugins/qqbot_knowledge/config.toml`、`plugins/qqbot_identity/config.toml`、`plugins/qqbot_visual/config.toml` 和 `plugins/qqbot_web_search/config.toml` 的顶层 `plugin.enabled` 为 `true`。知识插件通过 `127.0.0.1:8081` 使用云栖的共享 DSP 向量检索服务；身份插件在本机 `[identity].owner_qq` 填写真正主人 QQ，示例保持留空。
 - 蓝铃作为独立 bot，按本机各插件的 `plugin.enabled` 决定启用状态，不参与云栖与夜凛之间的家族插件同步或统一允许策略。
 - 蓝铃的聊天插件管理入口默认禁用，其 `src/plugins/built_in/plugin_management/config.toml` 由本机独立维护。
 
@@ -35,6 +35,8 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 蓝铃的私聊规划漏执行检查见 [qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md)，用于核对只有分析而没有调用 `reply` 的待回复消息。
 
 `qqbot_identity` 从同会话消息 API 读取真实发送者，为 Planner 中已经出现的消息补充身份表，Replyer 则按实际目标消息 ID 查询并注入 `platform/user_id/is_owner`。只有已核验的主人使用“主人”称呼，其他人和未知身份使用昵称或“你”；本机回复风格不得把所有第二人称替换成“主人”。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见 [qqbot_identity](../../plugins/qqbot_identity/README.md)。
+
+`provider.example.toml` 的生成 provider 使用本机 CPA 地址 `http://127.0.0.1:8317/v1` 与 CPA 客户端密钥。联网搜索单独使用官网凭据，部署方法见 [qqbot_web_search](../../plugins/qqbot_web_search/README.md)；嵌入 provider 保留原百炼接口，CPA 支持 `/embeddings` 前不能一起替换地址。
 
 `provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 120 秒。蓝铃本机保留原有任务模型分配；拍一拍与主动续聊判断也提供相同输出余量。接话条件、规划轮数、主动联系间隔和重试策略沿用现有配置。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
 

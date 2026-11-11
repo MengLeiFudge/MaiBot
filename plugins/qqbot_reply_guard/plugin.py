@@ -17,9 +17,8 @@ from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 PRIVATE_MESSAGE_SETTLE_SECONDS = 2.0
 SEARCH_RULE = (
     "[联网工具规则]tool_search 只查找本地延迟加载的函数工具，不搜索网页。"
-    "Responses 服务端原生 web_search 不属于该列表；不能因 tool_search 没找到就说无法联网。"
-    "如果本次请求提供 web_search，遇到对方明确要求搜索或需要核实的最新信息，"
-    "应直接使用原生 web_search，依据实际检索结果回答。普通闲聊无需搜索。"
+    "需要联网时，规划器先用 tool_search 查找 web_search，再调用它取得官网搜索证据。"
+    "回复应依据已经返回的检索结果和来源链接；普通闲聊无需搜索。"
     "搜索确实失败时说明这次查询失败；没有实际查询时不要声称已搜索。[/联网工具规则]"
 )
 MEMORY_RULE = (
