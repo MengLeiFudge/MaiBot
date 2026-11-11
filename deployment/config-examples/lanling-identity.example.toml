@@ -16,6 +16,10 @@ multiple_probability = 0.0
 [emoji]
 steal_emoji = true
 
+[response_post_process]
+# 缩短正文生成后的模拟等待，不改变记忆或模型思考强度。
+typing_speed = 0.2
+
 [maim_message]
 ws_server_host = "127.0.0.1"
 ws_server_port = 8021
