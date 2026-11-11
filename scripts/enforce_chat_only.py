@@ -12,7 +12,9 @@ import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = PROJECT_ROOT / "plugins"
-ALLOWED_PLUGINS = frozenset({"napcat_adapter", "qqbot_knowledge", "qqbot_poke", "qqbot_identity", "qqbot_visual"})
+ALLOWED_PLUGINS = frozenset({
+    "napcat_adapter", "qqbot_knowledge", "qqbot_poke", "qqbot_identity", "qqbot_visual", "qqbot_web_search",
+})
 PLUGIN_MANAGEMENT_CONFIG = PROJECT_ROOT / "src" / "plugins" / "built_in" / "plugin_management" / "config.toml"
 PLUGIN_SECTION_RE = re.compile(
     r"^(?P<header>\[plugin\][^\S\r\n]*(?:\r?\n|$))(?P<body>.*?)(?=^\[|\Z)",

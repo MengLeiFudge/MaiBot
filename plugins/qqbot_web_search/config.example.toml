@@ -1,0 +1,9 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[search]
+# 填写原有 DeepSeek 官网密钥，不是 CPA 客户端密钥。
+api_key = ""
+model = "deepseek-flash"
+timeout_seconds = 90
