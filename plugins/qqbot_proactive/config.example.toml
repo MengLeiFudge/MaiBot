@@ -11,3 +11,8 @@ max_idle_seconds = 300.0
 max_unanswered_turns = 2
 min_retry_seconds = 7200.0
 max_retry_seconds = 10800.0
+# 静默窗口只暂停主动联系，正常聊天仍可回复；两者相同表示关闭。
+quiet_start_hour = 0
+quiet_end_hour = 8
+# 日程由已有工作区文件工具维护，不额外调用模型生成。
+day_plan_file = "D:/project/lanling/计划/日程.json"

@@ -28,6 +28,10 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 蓝铃的个人工作区和文件工具配置见 [qqbot_workspace](../../plugins/qqbot_workspace/README.md)。`D:\project\lanling` 与整个 `D:\project\qqbot\maibot-lanling` 项目目录均可读写，项目内不按文件或配置字段另设授权；其他本机位置只读。文件工具绑定已有主人私聊的真实会话，项目文件的具体使用由提示词和主人后续指引约束。
 
+每日成品由 better-diary 负责，取材绑定主人私聊，23:30 自动生成，当日成品按配置公开发布空间；本机配置参考 [better-diary.example.toml](better-diary.example.toml)。[qqbot_diary](../../plugins/qqbot_diary/README.md) 只读上游成品存档并同步到个人工作区，保留手写历史与人工修改。空间使用独立的公开日记写作说明，不把完整聊天口吻带入公开日记。
+
+日程意图由工作区 `计划/日程.json` 保存，`qqbot_proactive` 的既有调度读取当天安排，并在 00:00–08:00 暂停主动联系；日程不等于已执行活动，静默窗口不替代共享休息状态。麦麦恋人与主动私聊 Plus 已退出蓝铃部署，其源码、配置和数据可恢复归档，不再安装第二套好感度或主动调度。
+
 蓝铃的私聊规划漏执行检查见 [qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md)，用于核对只有分析而没有调用 `reply` 的待回复消息。
 
 `qqbot_identity` 从同会话消息 API 读取真实发送者，为 Planner 中已经出现的消息补充身份表，Replyer 则按实际目标消息 ID 查询并注入 `platform/user_id/is_owner`。只有已核验的主人使用“主人”称呼，其他人和未知身份使用昵称或“你”；本机回复风格不得把所有第二人称替换成“主人”。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。详见 [qqbot_identity](../../plugins/qqbot_identity/README.md)。

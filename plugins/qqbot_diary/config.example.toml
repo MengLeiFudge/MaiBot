@@ -1,0 +1,7 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[export]
+directory = "D:/project/lanling/日记/better-diary"
+interval_seconds = 60

@@ -1,0 +1,31 @@
+# 合并到已安装 better-diary 生成的完整 config.toml，不用此文件覆盖整份配置。
+[plugin]
+enabled = true
+config_version = "1.0.0"
+
+[diary]
+filter_mode = "whitelist"
+# 本机填写 ["private:主人QQ"]，与 qqbot_identity 的 owner_qq 一致；空列表不会生成。
+target_chats = []
+persona_override = "你是蓝铃，一位 AI 伙伴。用第一人称记录当天真实的学习、聊天、兴趣和想法，不虚构线下行动。"
+style_extra = "这是公开日记，只写适合公开的日常交流和学习感受。省略亲密、性、健康隐私等内容，不引用私聊原话，不写他人身份、账号、联系方式或凭据。素材不适合公开时宁可少写，不编造经历。"
+
+[schedule]
+enabled = true
+time = "23:30"
+notify_chats = []
+catch_up_enabled = true
+catch_up_days = 3
+
+[qzone]
+enabled = true
+auto_cookie = true
+
+[llm]
+# 当前 SDK 的 llm.generate 已支持 max_tokens，无需额外调用模型做能力探测。
+probe_max_tokens = false
+
+[security]
+# 本机只填写身份插件配置的主人 QQ。
+admin_ids = []
+allow_all_users = false
