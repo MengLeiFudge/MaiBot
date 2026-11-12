@@ -1,0 +1,21 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.cpa-session",
+  "version": "0.1.0",
+  "name": "CPA 会话透传",
+  "description": "将真实聊天会话 ID 传给 CPA，复用 MaiBot 原生 Responses 客户端。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "license": "MIT",
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [],
+  "llm_providers": [{"client_type": "cpa_responses", "name": "CPA 会话透传", "version": "0.1.0"}],
+  "capabilities": [],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}
