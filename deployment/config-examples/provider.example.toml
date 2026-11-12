@@ -1,10 +1,10 @@
 # 部署参考版本：2。将此 CPA Responses 配置合并到 MaiBot 生成的 config/model_config.toml。
 # 嵌入 provider 与任务映射保持原样；CPA 需支持 /embeddings 后才能迁移。
-# api_key 填 CPA 客户端凭据；官网搜索另见 qqbot_web_search/config.example.toml。
+# 启用 plugins/cpa_session；api_key 填 CPA 客户端凭据；官网搜索另见 qqbot_web_search/config.example.toml。
 
 [[api_providers]]
 name = "DeepSeek"
-client_type = "openai_responses"
+client_type = "cpa_responses"
 base_url = "http://127.0.0.1:8317/v1"
 api_key = "<CPA-client-key-set-only-in-config/model_config.toml>"
 max_retry = 2 # 当前框架含首次调用，单模型最多尝试两次
