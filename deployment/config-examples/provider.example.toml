@@ -1,4 +1,4 @@
-# 将此 CPA Responses 配置合并到 MaiBot 生成的 config/model_config.toml。
+# 部署参考版本：2。将此 CPA Responses 配置合并到 MaiBot 生成的 config/model_config.toml。
 # 嵌入 provider 与任务映射保持原样；CPA 需支持 /embeddings 后才能迁移。
 # api_key 填 CPA 客户端凭据；官网搜索另见 qqbot_web_search/config.example.toml。
 
@@ -7,7 +7,7 @@ name = "DeepSeek"
 client_type = "openai_responses"
 base_url = "http://127.0.0.1:8317/v1"
 api_key = "<CPA-client-key-set-only-in-config/model_config.toml>"
-max_retry = 1
+max_retry = 2 # 当前框架含首次调用，单模型最多尝试两次
 timeout = 120
 retry_interval = 1
 auth_type = "bearer"
@@ -62,8 +62,8 @@ hard_timeout = 60
 
 [model_task_config.planner]
 model_list = ["deepseek-flash"]
-max_tokens = 8192
-hard_timeout = 60
+max_tokens = 16384 # 规划及共用 Planner 的情景分析保留完整推理与结果的余量
+hard_timeout = 120
 
 [model_task_config.memory]
 model_list = ["deepseek-flash"]
@@ -78,12 +78,12 @@ hard_timeout = 60
 [model_task_config.utils]
 model_list = ["deepseek-flash"]
 max_tokens = 8192
-hard_timeout = 60
+hard_timeout = 120 # 人物事实提取与文本整理可在此期限内完成
 
 [model_task_config.learner]
 model_list = ["deepseek-flash"]
-max_tokens = 8192
-hard_timeout = 60
+max_tokens = 16384 # 学习的推理与结果共享上限，减少输出截断后重跑
+hard_timeout = 120
 
 [model_task_config.expression_use]
 model_list = ["deepseek-flash"]

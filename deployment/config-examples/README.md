@@ -38,8 +38,10 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `provider.example.toml` 的生成 provider 使用本机 CPA 地址 `http://127.0.0.1:8317/v1` 与 CPA 客户端密钥。联网搜索单独使用官网凭据，部署方法见 [qqbot_web_search](../../plugins/qqbot_web_search/README.md)；嵌入 provider 保留原百炼接口，CPA 支持 `/embeddings` 前不能一起替换地址。
 
-`provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 120 秒。蓝铃本机保留原有任务模型分配；拍一拍与主动续聊判断也提供相同输出余量。接话条件、规划轮数、主动联系间隔和重试策略沿用现有配置。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
+`provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。蓝铃本机保留原有任务模型分配。Planner（包括共用此任务的情景分析）与 Learner 的推理和正文共享 16384 token，硬超时为 120 秒；Utils 保留 8192 token，硬超时为 120 秒；其他文本任务保留 8192 token、60 秒。生成 provider 请求超时 120 秒，`max_retry = 2` 在当前框架实现中表示含首次调用最多尝试两次。拍一拍与主动续聊判断仍使用各插件自己的输出限制。接话条件、规划轮数和主动联系间隔沿用现有配置。输出和时间都是上限，正常返回立即结束；放宽余量旨在减少截断重跑，实际费用需从新请求统计，不能保证每次调用更便宜。
 
 蓝铃所有群和私聊的长期记忆配置见 `lanling-identity.example.toml` 的 `a_memorix` 部分：关闭顶层聊天准入过滤，启用人物事实写回、聊天摘要写回、启发式召回和 Episode 自动生成；摘要消息窗口阈值为 12、回看上下文长度为 36、普通记忆查询默认取回 5 条，启发式召回在当前聊天新增 12 条消息后才会再次考虑。后台任务会增加模型调用，不做历史批量回填；现有历史是否纳入首次摘要由原生窗口决定。全局记忆共享、群到私聊及私聊到群的跨会话召回保持关闭，各会话在自己的范围读写记忆。嵌套 `filter.retrieval` 只限制跨会话检索，不改变本会话访问。
+
+人物事实写回由原生 `MemoryAutomationService.on_message_sent` 按每条已发送消息触发，`person_fact_writeback_enabled` 仅控制启停。调整聊天摘要窗口或重试次数，不会改变这项按发送消息触发的行为。维护此行为前须核对公开 Hook 与记忆写入能力；当前接口没有人物事实队列 Hook 或对应写入 API，因此保留原生提取，不用关闭记忆、改框架核心或数据库直写替代合并。
 
 回复延迟先区分 `llm_usage` 的模型时间、`maisaka_monitor_events` 的 Planner/工具时间和回复工具内 `detail.metrics`。蓝铃的 `response_post_process.typing_speed = 0.2` 缩短模型完成后的模拟打字等待；不因此关闭 Episode、改变召回频率或降低思考强度。Planner 的阶段时间还包含记忆印象整理，不能把它等同于主模型耗时；行为分析超时也可能延长部分回合，提速效果需以正常聊天样本观察。
