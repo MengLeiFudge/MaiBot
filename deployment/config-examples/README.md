@@ -26,6 +26,8 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 蓝铃的共享自身状态和私聊主动续聊配置见 [qqbot_proactive](../../plugins/qqbot_proactive/README.md)。活动、心情和休息期限由同一份持久状态提供给所有私聊与群聊；休息时暂停主动联系，并在 QQ 发送前拦截其他会话发言。状态工具成功后才生效，发起会话保留短暂告别窗口，到期或明确醒来后恢复。共享摘要只包含机器人自身状态，各会话的聊天原文和长期记忆仍按原范围保存。主人身份复用本机身份插件配置，两类状态分别保存在该插件标准数据目录的 `self_state.json` 与 `schedule.json`。
 
+蓝铃的性欲状态见 [qqbot_desire](../../plugins/qqbot_desire/README.md)。全账号共用一份按真实时间上涨的数值，默认约 12 小时涨满；聊天内容不改变速度。升高后仍先回答当前话题。很难受时可以自己解决，或在主人私聊记录实际亲密，成功后降到余韵。记录留在插件数据目录，不进入后续群聊提示。00:00–08:00 不主动发起这次决定。
+
 蓝铃的个人工作区和文件工具配置见 [qqbot_workspace](../../plugins/qqbot_workspace/README.md)。`D:\project\lanling` 与整个 `D:\project\qqbot\maibot-lanling` 项目目录均可读写，项目内不按文件或配置字段另设授权；其他本机位置只读。文件工具绑定已有主人私聊的真实会话，项目文件的具体使用由提示词和主人后续指引约束。
 
 每日成品由 better-diary 负责，取材绑定主人私聊，23:30 自动生成，当日成品按配置公开发布空间；本机配置参考 [better-diary.example.toml](better-diary.example.toml)。[qqbot_diary](../../plugins/qqbot_diary/README.md) 只读上游成品存档并同步到个人工作区，保留手写历史与人工修改。空间使用独立的公开日记写作说明，不把完整聊天口吻带入公开日记。

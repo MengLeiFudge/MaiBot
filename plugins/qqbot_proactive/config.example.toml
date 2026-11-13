@@ -7,10 +7,10 @@ config_version = "0.1.0"
 bot_qq = "3600812036"
 min_idle_seconds = 180.0
 max_idle_seconds = 300.0
-# 实际发出两轮而无人回应后，之后每轮使用 2–3 小时长间隔。
+# 实际发出两轮而无人回应后，之后每轮使用 30–60 分钟长间隔。
 max_unanswered_turns = 2
-min_retry_seconds = 7200.0
-max_retry_seconds = 10800.0
+min_retry_seconds = 1800.0
+max_retry_seconds = 3600.0
 # 静默窗口只暂停主动联系，正常聊天仍可回复；两者相同表示关闭。
 quiet_start_hour = 0
 quiet_end_hour = 8

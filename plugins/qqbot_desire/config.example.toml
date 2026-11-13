@@ -1,0 +1,13 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[desire]
+# 从 0 到 100 大约 12 小时。内容不会加快或减慢。
+hours_to_full = 12.0
+high_threshold = 80.0
+afterglow = 25.0
+# 达到阈值后，至少隔 45 分钟才再给一次空闲决定机会。
+decision_interval_seconds = 2700.0
+quiet_start_hour = 0
+quiet_end_hour = 8

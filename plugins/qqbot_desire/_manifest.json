@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-desire",
+  "version": "0.1.0",
+  "name": "QQBot 性欲状态",
+  "description": "按真实时间积攒一份跨会话性欲值，升高后由蓝铃自己决定是否释放并留下记录。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [{"type": "plugin", "id": "mlj.qqbot-identity", "version_spec": ">=0.1.0,<0.2.0"}],
+  "capabilities": ["config.get_plugin", "chat.get_stream_by_user_id", "maisaka.proactive.trigger"],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}
