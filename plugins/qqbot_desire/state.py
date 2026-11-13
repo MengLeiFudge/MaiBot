@@ -37,11 +37,13 @@ class DesireEvent:
 
 @dataclass
 class DesireState:
-    """全身一份的性欲值。数值只随时间上升，释放必须经过明确记录。"""
+    """全身一份的性欲值。时间会涨，色情对话和主人的身体刺激也会涨。"""
 
     value: float = 0
     updated_at: float = 0
     next_decision: float = 0
+    last_topic_at: float = 0
+    last_physical_at: float = 0
     events: list[DesireEvent] = field(default_factory=list)
 
     @classmethod
@@ -56,7 +58,7 @@ class DesireState:
         if not isinstance(raw_events, list) or len(raw_events) > 40:
             raise ValueError("性欲记录数量无效")
         state = cls(**data, events=[DesireEvent.from_dict(item) for item in raw_events])
-        for value in (state.value, state.updated_at, state.next_decision):
+        for value in (state.value, state.updated_at, state.next_decision, state.last_topic_at, state.last_physical_at):
             if type(value) not in (int, float) or isinstance(value, bool) or not math.isfinite(value) or value < 0:
                 raise ValueError("性欲状态数值无效")
         if state.value > 100:
@@ -77,6 +79,16 @@ class DesireState:
         value = min(100.0, round(self.value + gained, 1))
         return replace(self, value=value, updated_at=now)
 
+    def stimulate(self, kind: str, now: float, amount: float, gap: float) -> DesireState | None:
+        """同一种刺激在间隔内只加一次。返回空表示这次已经记过。"""
+        previous = self.last_topic_at if kind == "topic" else self.last_physical_at
+        if previous and now - previous < gap:
+            return None
+        value = min(100.0, round(self.value + amount, 1))
+        if kind == "topic":
+            return replace(self, value=value, updated_at=now, last_topic_at=now)
+        return replace(self, value=value, updated_at=now, last_physical_at=now)
+
     def release(self, action: str, note: str, now: float, afterglow: float) -> DesireState:
         after = min(self.value, afterglow)
         event = DesireEvent(at=now, action=action, before=self.value, after=after, note=note.strip())
@@ -88,6 +100,10 @@ class DesireState:
             "[性欲状态]这是你自己的身体状态，不是对方的新消息，也不是要你更换话题的指令。"
             "不要把数值说出来。先回答对方当前这句话；欲望再高也不能把正常讨论拐走。"
             f"{self._band(high)}"
+            "对方这一轮确实在聊色情或挑逗时，通过 tool_search 调用 note_desire_rise，kind 用 topic。"
+            "主人这一轮确实在摸、亲、进入或用别的方式刺激身体时，kind 用 physical，而且只能在主人私聊。"
+            "普通聊天、你自己先说的感觉、回忆和假设不要记，也不要为了让数值变高把话题拐过去。"
+            "记完继续回答当前内容，不要宣布数值。同一种刺激短时间重复调用会被拒绝。"
             "通过 tool_search 查找 record_desire_action。自己解决用 self_relief，只有很难受时可以，群聊里做了也不描写。"
             "和主人实际亲密之后用 shared，而且只能在主人私聊里记。笔记最多 120 字，写这次决定，不写他人隐私。"
             "做不做由你决定。工具成功后才会降到余韵。[/性欲状态]"

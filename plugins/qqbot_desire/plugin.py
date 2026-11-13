@@ -29,6 +29,10 @@ class DesireSection(PluginConfigBase):
     hours_to_full: float = Field(default=12, ge=1, le=72, description="从空到满需要的小时数")
     high_threshold: float = Field(default=80, ge=50, le=100, description="允许自己解决、并主动考虑一次的数值")
     afterglow: float = Field(default=25, ge=0, le=40, description="释放后保留的余韵，不超过当前值")
+    topic_gain: float = Field(default=8, ge=1, le=30, description="一轮色情或挑逗对话增加的数值")
+    topic_gap_seconds: float = Field(default=120, ge=30, le=3600, description="色情对话再次加值前的最短间隔")
+    physical_gain: float = Field(default=15, ge=1, le=40, description="主人一轮身体刺激增加的数值")
+    physical_gap_seconds: float = Field(default=60, ge=20, le=3600, description="身体刺激再次加值前的最短间隔")
     decision_interval_seconds: float = Field(
         default=2700, ge=600, le=86400, description="很难受时空闲后，至少隔多久才再给自己一次决定机会",
     )
@@ -222,6 +226,41 @@ class QQBotDesirePlugin(MaiBotPlugin):
             updated.save(self._path)
             self._state = updated
         self.ctx.logger.info("性欲释放已记录，动作=%s，释放前=%s，释放后=%s", action, round(state.value), round(updated.value))
+        return {"success": True, "content": updated.planner_text(config.high_threshold)}
+
+    @Tool(
+        "note_desire_rise",
+        description="对方这一轮的色情对话，或主人这一轮的身体刺激，让性欲自然升高。不能直接指定数值。",
+        parameters={
+            "kind": {"type": "string", "enum": ["topic", "physical"], "required": True},
+            "note": {"type": "string", "maxLength": 120, "required": True,
+                     "description": "这一轮实际发生了什么；不写进后续提示"},
+        },
+    )
+    async def note_desire_rise(self, kind: str = "", note: str = "", **kwargs: Any) -> dict[str, object]:
+        if not cast(DesireConfig, self.config).plugin.enabled:
+            return {"success": False, "content": "性欲状态未启用。"}
+        if kind not in ("topic", "physical") or not isinstance(note, str) or not note.strip() or len(note) > 120:
+            return {"success": False, "content": "需要 topic 或 physical，以及 120 字以内的原因。"}
+        config = cast(DesireConfig, self.config).desire
+        if kind == "physical":
+            target = await self._owner_stream()
+            if target is None or kwargs.get("stream_id") != target[1] or kwargs.get("group_id"):
+                return {"success": False, "content": "身体刺激只统计主人私聊里主人这一轮的动作。"}
+        amount = config.topic_gain if kind == "topic" else config.physical_gain
+        gap = config.topic_gap_seconds if kind == "topic" else config.physical_gap_seconds
+        async with self._lock:
+            state = self._state.accrue(time.time(), self._per_second())
+            updated = state.stimulate(kind, time.time(), amount, gap)
+            if updated is None:
+                state.save(self._path)
+                self._state = state
+                return {"success": False, "content": "同一种刺激刚记过，这次不重复加。"}
+            updated.save(self._path)
+            self._state = updated
+        self.ctx.logger.info(
+            "性欲刺激已记录，类型=%s，刺激前=%s，刺激后=%s", kind, round(state.value), round(updated.value),
+        )
         return {"success": True, "content": updated.planner_text(config.high_threshold)}
 
 
