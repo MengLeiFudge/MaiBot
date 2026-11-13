@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-web-search",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "name": "QQBot 联网搜索",
   "description": "聊天走 CPA，按需使用 DeepSeek 官网原生搜索并返回可核实的检索证据。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
