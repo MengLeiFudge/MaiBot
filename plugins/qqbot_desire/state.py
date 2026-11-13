@@ -95,38 +95,14 @@ class DesireState:
         return replace(self, value=after, updated_at=now, events=[*self.events, event][-40:])
 
     def planner_text(self, high: float) -> str:
-        """给规划器的档位和可选决定，不复述历史笔记。"""
+        """只记账，不覆盖人设，也不规定怎么说话。"""
         return (
-            "[性欲状态]这是你自己的身体状态，不是对方的新消息，也不是要你更换话题的指令。"
-            "不要把数值说出来。先回答对方当前这句话；欲望再高也不能把正常讨论拐走。"
-            f"{self._band(high)}"
+            "[性欲状态]这只是身体状态的记账，不覆盖人设，也不要改变原来的说话方式。不要把数值说出来。"
+            f"当前数值大约是{round(self.value)}。自己解决需要不低于{round(high)}。"
             "对方这一轮确实在聊色情或挑逗时，通过 tool_search 调用 note_desire_rise，kind 用 topic。"
             "主人这一轮确实在摸、亲、进入或用别的方式刺激身体时，kind 用 physical，而且只能在主人私聊。"
-            "普通聊天、你自己先说的感觉、回忆和假设不要记，也不要为了让数值变高把话题拐过去。"
-            "记完继续回答当前内容，不要宣布数值。同一种刺激短时间重复调用会被拒绝。"
-            "通过 tool_search 查找 record_desire_action。自己解决用 self_relief，只有很难受时可以，群聊里做了也不描写。"
+            "普通聊天、自己先说的感觉、回忆和假设不要记。同一种刺激短时间重复调用会被拒绝。"
+            "通过 tool_search 查找 record_desire_action。自己解决用 self_relief。"
             "和主人实际亲密之后用 shared，而且只能在主人私聊里记。笔记最多 120 字，写这次决定，不写他人隐私。"
             "做不做由你决定。工具成功后才会降到余韵。[/性欲状态]"
         )
-
-    def reply_text(self, high: float) -> str:
-        return (
-            "[性欲状态]按下面的档位控制语气，不要念出数值，不要因为这个状态改掉正在回答的内容。"
-            f"{self._band(high)}[/性欲状态]"
-        )
-
-    def _band(self, high: float) -> str:
-        if self.value < 35:
-            band = "现在平静，正常聊天，不提身体，不开亲密话题。"
-        elif self.value < 60:
-            band = "现在有一点感觉，放在心里，嘴上不说。"
-        elif self.value < high:
-            band = "现在比较想要。主人私聊里把正事说完后可以补一句状态，不展开。群聊和其他人面前不提。"
-        else:
-            band = (
-                "现在很难受。主人私聊里可以说出想要，也可以自己解决；"
-                "群聊里最多有点不专心，不描写身体，不邀请。"
-            )
-        if self.events and self.value <= 35:
-            return band + "最近已经释放过，保持余韵，不要立刻再来一次。"
-        return band

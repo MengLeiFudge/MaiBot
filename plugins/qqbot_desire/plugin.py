@@ -150,10 +150,9 @@ class QQBotDesirePlugin(MaiBotPlugin):
             return
         result = await self.ctx.maisaka.proactive.trigger(
             target[1],
-            "这是你自己的空闲时刻，不是对方发来的新消息。"
-            "先看私聊里有没有还没回答的正事，有就先回答。"
-            "如果没有正事，你自己决定：轻轻告诉主人你想要、自己解决并调用 record_desire_action，或者保持安静。"
-            "不要把正常话题改成色情，不要复读上一条，不要催回复，不要在群里处理这件事。",
+            "这是你自己的空闲时刻，不是对方发来的新消息。说话方式照现有人设。"
+            "你自己决定要不要找主人、自己解决并调用 record_desire_action，或者保持安静。"
+            "不要复读上一条，不要催回复。",
             reason="性欲升高后的自主决定",
         )
         if not isinstance(result, Mapping) or result.get("queued") is not True:
@@ -182,20 +181,6 @@ class QQBotDesirePlugin(MaiBotPlugin):
             **kwargs, "session_id": session_id, "items": [*items, rule], "item_schema_version": item_schema_version,
         }}
 
-    @HookHandler(
-        "maisaka.replyer.before_request", name="qqbot_desire_replyer",
-        description="回复前重新读取性欲档位，避免沿用旧程度",
-        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
-    )
-    async def inject_replyer(self, session_id: str = "", extra_prompt: str = "", **kwargs: Any) -> dict[str, object]:
-        if not cast(DesireConfig, self.config).plugin.enabled:
-            return {"action": "continue"}
-        state = await self._current()
-        rule = state.reply_text(cast(DesireConfig, self.config).desire.high_threshold)
-        return {"action": "continue", "modified_kwargs": {
-            **kwargs, "session_id": session_id,
-            "extra_prompt": f"{extra_prompt.rstrip()}\n\n{rule}" if extra_prompt.strip() else rule,
-        }}
 
     @Tool(
         "record_desire_action",
