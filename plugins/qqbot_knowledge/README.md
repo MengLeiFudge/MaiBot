@@ -1,10 +1,10 @@
 # QQBot Knowledge
 
-`mlj.qqbot-knowledge` is a MaiBot SDK 2.7 plugin that injects bounded source evidence into one Replyer request. It does not answer messages itself.
+`mlj.qqbot-knowledge` is a MaiBot SDK 2.7 plugin that injects bounded source evidence into Planner and Replyer requests. It does not answer messages itself.
 
 ## Shared DSP retrieval
 
-DSP knowledge has one physical owner: Yunqi's AstrBot `dsp-major-mods` vector knowledge base. For every Replyer request, this plugin sends the bounded current query and structured group ID to `http://127.0.0.1:8081/v1/knowledge/dsp/search`.
+DSP knowledge has one physical owner: Yunqi's AstrBot `dsp-major-mods` vector knowledge base. For Planner and Replyer requests, this plugin sends the bounded current query and structured group ID to `http://127.0.0.1:8081/v1/knowledge/dsp/search`.
 
 The AstrBot service decides whether the query belongs to DSP. New matching questions use Qwen embedding recall, AstrBot's dense/sparse fusion, and `qwen3-rerank`. Complete greetings, acknowledgements, thanks, and messages without textual content skip paid retrieval. Successful results are shared in an AstrBot-owned memory cache for up to one hour, bounded to 128 queries and invalidated when indexed sources change. Identical concurrent questions reuse one retrieval. Returned evidence is injected into Yelin's existing model request, so Yelin's own chat model still writes the final response. Yelin does not store, update, or embed a second DSP corpus.
 
@@ -26,7 +26,7 @@ Shapez and Factorio retain the existing bounded standard-library source search. 
 ## Request flow
 
 1. `chat.receive.before_process` records `session_id -> group_id` only from structured group messages.
-2. `maisaka.replyer.before_model_request` reads the last `UserMessageItem.parts` in Context Item schema 1, capped by `search.max_query_chars`.
+2. `maisaka.planner.before_request` and `maisaka.replyer.before_model_request` share the same retrieval and evidence injection. Each reads the last `UserMessageItem.parts` in Context Item schema 1, capped by `search.max_query_chars`.
 3. The loopback DSP service is queried first. A non-DSP result may then select Shapez or Factorio local roots.
 4. One `<mlj.qqbot-knowledge:v1>` evidence block is added as a `SystemMessageItem`. Existing Items and their IDs, relationships, and content stay unchanged. Repeated injection recognizes the plugin's stable evidence Item ID.
 5. The block requires evidence-only factual claims, plain QQ text, and an explicit uncertainty statement when the excerpts do not establish the requested fact.

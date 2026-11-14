@@ -15,6 +15,6 @@
 
 只有官网响应完成、包含已完成的 `web_search_call` 且有回答正文时，工具才返回成功。引用链接保存在 `sources`，过长摘要通过 `truncated` 标明截断。HTTP 错误、超时、无搜索记录和空正文分别返回失败，不能用普通模型生成内容冒充检索结果。
 
-搜索沿用 `deepseek-flash`、`reasoning.effort = "max"` 和 8192 输出 token 上限。每次工具执行只有一次官网请求，总超时由 `search.timeout_seconds` 控制，范围 5–150 秒；失败不自动重试。官网搜索费用在官网账单查看，该直接 HTTP 请求不进入 MaiBot 的 `llm_usage`。
+Flash 使用官网 `deepseek_web_search` 和自动工具选择；Pro 使用兼容 `web_search` 并要求工具调用。搜索沿用 `deepseek-flash`、`reasoning.effort = "max"` 和 32768 输出 token 上限。每次工具执行只有一次官网请求，总超时由 `search.timeout_seconds` 控制，范围 5–150 秒；失败不自动重试。官网搜索费用在官网账单查看，该直接 HTTP 请求不进入 MaiBot 的 `llm_usage`。
 
 更新 CPA 时，需要核对其兼容渠道是否真正保留 Responses 原生 `web_search` 及搜索结果事件；仅有 `/responses` 地址或同名模型不足以证明支持。确实支持后才能停用本插件、恢复普通模型原生搜索，避免重复查询。插件加载和静态检查不证明真实网络查询成功。

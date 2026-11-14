@@ -195,6 +195,19 @@ class QQBotKnowledgePlugin(MaiBotPlugin):
         return {"action": "continue"}
 
     @HookHandler(
+        "maisaka.planner.before_request", name="qqbot_knowledge_planner_injection",
+        description="直接公开答复前向 Planner 提供与原生回复器相同的知识证据",
+        mode=HookMode.BLOCKING, order=HookOrder.NORMAL, timeout_ms=25000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def inject_planner_knowledge(
+        self, items: object = None, item_schema_version: int = 0, session_id: str = "", **kwargs: Any,
+    ) -> dict[str, object]:
+        """复用原有检索、缓存与证据约束，不创建新的知识库。"""
+        return await self.inject_source_knowledge(
+            items=items, item_schema_version=item_schema_version, session_id=session_id, **kwargs,
+        )
+
+    @HookHandler(
         "maisaka.replyer.before_model_request",
         name="qqbot_knowledge_injection",
         description="向当前模型请求临时注入共享向量或本地源码证据",

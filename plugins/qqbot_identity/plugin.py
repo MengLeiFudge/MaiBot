@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
+from html import escape
 from typing import Any, ClassVar, cast
 
 import asyncio
@@ -63,7 +64,7 @@ class QQBotIdentityPlugin(MaiBotPlugin):
     async def on_load(self) -> None:
         """只报告配置状态，不在加载期间查询消息或调用模型。"""
         self.ctx.logger.info(
-            "QQBot 身份提示已加载，主人账号已配置=%s；Planner 发送者身份保持未知",
+            "QQBot 身份提示已加载，主人账号已配置=%s；Planner 与 Replyer 均核验真实消息发送者",
             bool(cast(IdentityConfig, self.config).identity.owner_qq),
         )
 
@@ -79,14 +80,14 @@ class QQBotIdentityPlugin(MaiBotPlugin):
     @HookHandler(
         "maisaka.planner.before_request",
         name="qqbot_identity_planner",
-        description="向 Planner 本次 Context Items 注入身份规则，缺少发送者事实时保持未知",
+        description="向 Planner 注入本轮真实消息的发送者事实，查询失败保持未知",
         mode=HookMode.BLOCKING,
         order=HookOrder.LATE,
-        timeout_ms=1000,
+        timeout_ms=5000,
         error_policy=ErrorPolicy.SKIP,
     )
     async def inject_planner_identity(
-        self, items: object = None, item_schema_version: int = 0, **kwargs: Any
+        self, items: object = None, item_schema_version: int = 0, session_id: str = "", **kwargs: Any
     ) -> dict[str, object]:
         """保留原 Items 及元数据，新增符合框架 schema 1 的系统文本项。"""
         config = cast(IdentityConfig, self.config)
@@ -94,7 +95,46 @@ class QQBotIdentityPlugin(MaiBotPlugin):
             return {"action": "continue"}
         if item_schema_version != 1 or not isinstance(items, list):
             raise ValueError("身份插件需要 Context Item schema 1 的 items 列表")
-        # 当前 Item schema 没有发送者字段；不从可伪造的正文或显示名反推 QQ。
+        fact: dict[str, object] | None = None
+        # 消息头只关联上下文；真实发送者始终从同会话消息 API 取得。
+        texts: list[str] = []
+        for item in items:
+            if not isinstance(item, Mapping) or item.get("item_type") != "UserMessageItem":
+                continue
+            parts = item.get("parts")
+            if not isinstance(parts, list):
+                continue
+            for part in parts:
+                text = part.get("text") if isinstance(part, Mapping) else None
+                if isinstance(text, str):
+                    texts.append(text)
+        if session_id and texts:
+            try:
+                async with asyncio.timeout(3):
+                    messages = await self.ctx.call_capability(
+                        "message.get_recent", chat_id=session_id, limit=20, filter_mai=True, include_binary_data=False,
+                    )
+                if not isinstance(messages, list):
+                    raise ValueError("身份查询没有返回消息列表")
+                for message in reversed(messages):
+                    if not isinstance(message, Mapping) or message.get("session_id") != session_id:
+                        continue
+                    message_id = message.get("message_id")
+                    if not isinstance(message_id, str) or not any(
+                        text.startswith(f'<message msg_id="{escape(message_id, quote=True)}" ') for text in texts
+                    ):
+                        continue
+                    info = message.get("message_info")
+                    sender = info.get("user_info") if isinstance(info, Mapping) else None
+                    user_id = sender.get("user_id") if isinstance(sender, Mapping) else None
+                    platform = message.get("platform")
+                    if isinstance(user_id, str) and user_id and isinstance(platform, str) and platform:
+                        fact = {"message_id": message_id, "platform": platform, "user_id": user_id,
+                                "is_owner": bool(config.identity.owner_qq) and platform == "qq"
+                                and user_id == config.identity.owner_qq}
+                        break
+            except Exception as exc:
+                self.ctx.logger.warning("规划目标身份查询失败，保持未知: error_type=%s", type(exc).__name__)
         rule_item = {
             "item_type": "SystemMessageItem",
             "meta": {
@@ -102,12 +142,13 @@ class QQBotIdentityPlugin(MaiBotPlugin):
                 "logical_turn_id": None,
                 "timestamp": datetime.now().isoformat(),
             },
-            "parts": [{"type": "text", "text": _identity_rules(config.identity.owner_qq)}],
+            "parts": [{"type": "text", "text": _identity_rules(config.identity.owner_qq, fact)}],
         }
         return {
             "action": "continue",
             "modified_kwargs": {
                 **kwargs,
+                "session_id": session_id,
                 "items": [rule_item, *items],
                 "item_schema_version": item_schema_version,
             },
