@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from asyncio import CancelledError, create_task
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ class ReplyTurn:
     source_id: str
     started_at: float
     first_delivery_id: str = ""
+    wait_task: asyncio.Task[None] | None = None
 
 
 def normal_delay(text: str, speed: float, is_emoji: bool = False) -> float:
@@ -92,6 +94,9 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
                 self._received.move_to_end(session_id)
                 if len(self._received) > 128:
                     self._received.popitem(last=False)
+                turn = self._turns.get(session_id)
+                if turn is not None and turn.source_id != message_id and turn.wait_task is not None:
+                    turn.wait_task.cancel()
         return {"action": "continue"}
 
     @HookHandler(
@@ -201,9 +206,24 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         delay = normal_delay(text if isinstance(text, str) else "", speed, message.get("is_emoji") is True)
         elapsed = max(0.0, time.monotonic() - turn.started_at)
         wait = max(0.0, delay - elapsed)
-        if wait:
-            await asyncio.sleep(wait)
+        received = self._received.get(session_id)
+        if wait and (received is None or received[0] == turn.source_id):
+            turn.wait_task = create_task(asyncio.sleep(wait))
+            try:
+                await turn.wait_task
+            except CancelledError:
+                received = self._received.get(session_id)
+                if received is None or received[0] == turn.source_id:
+                    raise
+            finally:
+                turn.wait_task = None
         if not self._enabled():
+            return {"action": "abort"}
+        received = self._received.get(session_id)
+        if received is not None and received[0] != turn.source_id:
+            # 此处尚未调用平台，旧首段可以明确放弃，不影响下一轮首条资格。
+            turn.first_delivery_id = ""
+            self.ctx.logger.info("首条等待期间收到新消息，取消旧首段发送")
             return {"action": "abort"}
         self.ctx.logger.info("首条回复等待: 原等待=%.3fs 已处理=%.3fs 补等=%.3fs", delay, elapsed, wait)
         return {"action": "continue", "modified_kwargs": {**kwargs, "message": message, "typing": False}}

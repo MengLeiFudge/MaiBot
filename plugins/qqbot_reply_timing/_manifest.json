@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-reply-timing",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "name": "QQBot 首条回复等待",
   "description": "补齐本账号 NapCat 出站路由，首条回复抵扣已耗时，后续保持原速。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},

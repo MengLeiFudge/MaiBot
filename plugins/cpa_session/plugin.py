@@ -7,7 +7,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from maibot_sdk import Field, HookHandler, LLMProvider, MaiBotPlugin, PluginConfigBase
-from maibot_sdk.types import HookMode, HookOrder
+from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 from src.config.model_configs import APIProvider
 from src.llm_models.model_client.base_client import ResponseRequest
@@ -21,6 +21,8 @@ from src.llm_models.request_snapshot import (
     serialize_context_item_snapshot,
     serialize_context_items_snapshot,
 )
+
+from .interruption import ReplyInterruption
 
 
 class PluginSection(PluginConfigBase):
@@ -47,6 +49,7 @@ class CPASessionPlugin(MaiBotPlugin):
         super().__init__()
         self._sessions: OrderedDict[str, tuple[str, bool]] = OrderedDict()
         self._replay: OrderedDict[str, ContextItem] = OrderedDict()
+        self._interruption = ReplyInterruption()
 
     async def on_load(self) -> None:
         """报告本地 Provider 已就绪，不在加载时调用模型。"""
@@ -57,16 +60,65 @@ class CPASessionPlugin(MaiBotPlugin):
         del scope, config_data
         self.ctx.logger.info("CPA 会话透传配置已更新：version=%s", version)
 
+    @HookHandler("chat.receive.after_process", mode=HookMode.BLOCKING, order=HookOrder.LATE)
+    async def receive(self, message: Any = None, **_kwargs: Any) -> dict:
+        """新消息只更新本地轮次并取消过期请求，不向框架重复投递消息。"""
+        if isinstance(message, dict):
+            self._interruption.observe(message)
+        return {"action": "continue"}
+
+    @HookHandler("maisaka.planner.after_response", mode=HookMode.BLOCKING, order=HookOrder.EARLY)
+    async def discard_old_plan(self, session_id: str = "", **kwargs: Any) -> dict:
+        """模型返回与新消息交错时，不执行旧快照产生的工具调用。"""
+        turn = self._interruption.turns.get(session_id)
+        if turn is not None and turn.stale:
+            self.ctx.logger.info("新消息已取代尚未公开答复的规划，交由原生循环重新收集")
+            return {"action": "continue", "modified_kwargs": {**kwargs, "session_id": session_id, "output_items": []}}
+        return {"action": "continue"}
+
+    @HookHandler("maisaka.reply.before_post_process", mode=HookMode.BLOCKING, order=HookOrder.LATE)
+    async def discard_old_reply(self, session_id: str = "", **kwargs: Any) -> dict:
+        """尚未发出首条时，过期正文不进入分段和发送。"""
+        turn = self._interruption.reply_turns.get(session_id)
+        if turn is not None and turn.stale:
+            self.ctx.logger.info("新消息已取代尚未发送的正文，等待原生回复器重写")
+            return {"action": "continue", "modified_kwargs": {**kwargs, "session_id": session_id, "response": ""}}
+        return {"action": "continue"}
+
+    @HookHandler("send_service.before_send", mode=HookMode.BLOCKING, order=HookOrder.EARLY, error_policy=ErrorPolicy.ABORT)
+    async def check_before_send(self, message: Any = None, **_kwargs: Any) -> dict:
+        """只拦截尚未公开答复的旧轮次，已经发出首段的回复继续发送。"""
+        session_id = message.get("session_id") if isinstance(message, dict) else None
+        turn = self._interruption.reply_turns.get(session_id)
+        return {"action": "abort" if turn is not None and turn.stale else "continue"}
+
+    @HookHandler("send_service.after_send", mode=HookMode.BLOCKING, order=HookOrder.EARLY)
+    async def mark_first_sent(self, message: Any = None, sent: bool = False, **_kwargs: Any) -> dict:
+        """只有明确成功回执才关闭本轮取消资格，失败不冒充已发。"""
+        session_id = message.get("session_id") if isinstance(message, dict) else None
+        turn = self._interruption.reply_turns.get(session_id)
+        if sent and turn is not None:
+            turn.first_sent = True
+        return {"action": "continue"}
+
     @HookHandler("maisaka.planner.before_request", mode=HookMode.BLOCKING, order=HookOrder.LATE)
-    async def planner_session(self, session_id: str = "", items: Any = None, **_kwargs: Any) -> dict:
-        """登记 Planner 的真实会话，不改动提示词或 Context Items。"""
+    async def planner_session(
+        self, session_id: str = "", items: Any = None, tool_definitions: Any = None, **_kwargs: Any,
+    ) -> dict:
+        """登记真实会话；只有带原生回复工具的主规划建立回复轮次。"""
         self._remember_session(session_id, items, False)
+        if isinstance(tool_definitions, list) and any(
+            isinstance(tool, dict) and isinstance(tool.get("function"), dict)
+            and tool["function"].get("name") == "reply" for tool in tool_definitions
+        ):
+            self._interruption.bind(session_id, items, False)
         return {"action": "continue"}
 
     @HookHandler("maisaka.replyer.before_model_request", mode=HookMode.BLOCKING, order=HookOrder.LATE)
     async def replyer_session(self, session_id: str = "", items: Any = None, **_kwargs: Any) -> dict:
         """登记 Replyer 已构造请求的真实会话。"""
         self._remember_session(session_id, items, True)
+        self._interruption.bind(session_id, items, True)
         return {"action": "continue"}
 
     def _remember_session(self, session_id: str, items: Any, replyer: bool) -> None:
@@ -80,7 +132,7 @@ class CPASessionPlugin(MaiBotPlugin):
         while len(self._sessions) > self.CACHE_LIMIT:
             self._sessions.popitem(last=False)
 
-    @LLMProvider("cpa_responses", name="CPA 会话透传", version="0.1.0")
+    @LLMProvider("cpa_responses", name="CPA 会话透传", version="0.1.1")
     async def generate(self, operation: str, request: dict[str, Any]) -> dict[str, Any]:
         """还原公开请求类型，加会话头后直接交给原生 Responses 客户端。"""
         if operation != "response" or request["item_schema_version"] != 1:
@@ -111,7 +163,7 @@ class CPASessionPlugin(MaiBotPlugin):
         }
         headers.update({
             "X-Client-Request-Id": quote(session_id, safe=":"),
-            "User-Agent": "QQBot/MaiBot-cpa-session/0.1.0",
+            "User-Agent": "QQBot/MaiBot-cpa-session/0.1.1",
         })
         extra["headers"] = headers
         native_request = ResponseRequest(
@@ -125,15 +177,22 @@ class CPASessionPlugin(MaiBotPlugin):
             logical_turn_id=request.get("logical_turn_id") or uuid4().hex,
         )
         client = OpenAIResponsesClient(APIProvider.model_validate(request["api_provider"]))
+        turn = (self._interruption.reply_turns if replyer else self._interruption.turns).get(session_id)
         try:
-            response = await client.get_response(native_request)
-            usages = [asdict(response.usage)] if response.usage is not None else []
-            # 原生 Replyer 仅对内置 client_type 续写；在适配器中保留同一模型续写一次的行为。
-            if replyer and any(isinstance(item, ReasoningItem) for item in response.output_items) and not (response.content or "").strip():
-                native_request.context_items.extend(response.output_items)
-                response = await client.get_response(native_request)
+            usages = []
+            # 保留原生 Replyer 仅有推理时续写一次的行为，两次请求均可被新消息取代。
+            for attempt in range(2):
+                response = await self._interruption.request(client, native_request, turn)
+                if response is None:
+                    self.ctx.logger.info("首条发送前收到新消息，已取消或跳过旧模型请求")
+                    return {"item_schema_version": 1, "output_items": [], "status": "cancelled",
+                            "usage": None, "raw_data": {"cancelled_by_new_message": True}}
                 if response.usage is not None:
                     usages.append(asdict(response.usage))
+                if (attempt or not replyer or not any(isinstance(item, ReasoningItem) for item in response.output_items)
+                        or (response.content or "").strip()):
+                    break
+                native_request.context_items.extend(response.output_items)
             for item in response.output_items:
                 self._replay[item.meta.item_id] = item
             while len(self._replay) > self.CACHE_LIMIT:
@@ -154,6 +213,7 @@ class CPASessionPlugin(MaiBotPlugin):
 
     async def on_unload(self) -> None:
         """释放本插件的会话关联及原生回放项。"""
+        await self._interruption.close()
         self._sessions.clear()
         self._replay.clear()
 

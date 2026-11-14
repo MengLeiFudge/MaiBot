@@ -12,7 +12,7 @@
 
 规划后已有函数调用或平台原生活动时，保持原输出及全部附件参数。只有纯文本规划且目标尚未回复时，才用现有 `planner` 模型对这份规划核对一次动作，最长等待 15 秒。明确需要回应时补上单个原生 `reply`，正文仍由原生回复器生成，引用关闭。静默、意图不明确、目标已变化或核对失败时保留原结果。同一来源在插件进程内只核对一次，超时和取消也不循环请求。群聊和已回复后的原生续轮保持原处理。
 
-在本机 `bot_config.toml` 的 `[chat.reply_timing]` 中设置 `planner_interrupt_max_consecutive_count = 10`，允许新消息打断运行中的 Planner，并在原生静默窗口结束后重新收集消息。`0` 表示禁用；连续打断达到上限后本次请求正常完成。此设置不取消已经进入 Replyer 或发送阶段的任务，也不能撤回已发送消息。
+在本机 `bot_config.toml` 的 `[chat.reply_timing]` 中设置 `planner_interrupt_max_consecutive_count = 10`，允许新消息打断运行中的 Planner，并在原生静默窗口结束后重新收集消息。`0` 表示禁用；连续打断达到上限后本次请求正常完成。此设置只控制框架原生 Planner 打断。使用 [CPA 会话插件](../cpa_session/README.md) 时，首条公开回复送达前的准备、Planner、Replyer 和发送前等待均可被新消息取代；首条成功后保留本轮后续分段，不能撤回已发送消息。
 
 Planner 和待回复私聊的 Replyer 都追加联网说明：`tool_search` 查找本地延迟加载工具，规划器再调用 [qqbot_web_search](../qqbot_web_search/README.md) 的 `web_search` 取得官网证据。只有实际返回的结果可作为联网依据，普通聊天不强制搜索。记忆规则区分检索被过滤、报错和无结果，不凭空补写共同经历。
 
