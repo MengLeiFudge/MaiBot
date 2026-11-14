@@ -8,6 +8,8 @@
 
 非定向普通图片保留已有描述，缺描述时写 `[图片]`，移除 `binary_data_base64`，保留组件 hash 和其余路由、发送者、时间及文本。转发中的媒体递归处理。原生组件遇到非空 content 会跳过 VLM 和保存，因此普通新群图不保证进入媒体文件缓存。设置 `emoji.steal_emoji = true` 后，表情组件保留原始数据与二进制，进入原生表情描述、缓存和本地注册链；关闭该开关时，非定向表情沿用占位策略。注册数量、检查间隔、单图大小和替换规则沿用 `[emoji]` 配置。
 
+定向看图只控制图片识别和原图传入。非定向群图仍参与 `[chat.reply_timing]` 的群聊调度，由 Planner 决定是否调用 `reply`。排查“未呼叫也回图”时，分别核对入站消息的定向标记、Planner/Replyer 请求中的实际图像 Part，以及 Planner 的回复工具调用；只有 `[图片]` 占位不能证明模型看过原图。首条发送前的新消息打断也不承担群聊发言筛选。
+
 蓝铃保持 `[visual].planner_mode = "text"`、`replyer_mode = "text"`，以保留群聊的文字识图策略；私聊附件和群聊定向引用图通过请求 Hook 单独补充。`wait_image_recognize_max_time = 15.0` 仍用于原生图片描述等待，不是整个识图任务的超时。
 
 `maisaka.planner.before_request` 和 `maisaka.replyer.before_model_request` 使用 `image_context.py` 的同一条媒体读取链：查询最近 60 条、30 天内的消息，仅处理真实归属本会话且已进入当前请求的消息。通过 `message.get_by_id(include_binary_data=True)` 读取附件，向原消息的 Context Item 增加图像 Part，保留文本、来源和时间。普通引用最多展开两条同会话目标，不递归转发。群聊只有定向消息展开自身附件及显式引用图，非定向普通图片仍沿用占位策略。每组帧标注来源消息 ID，只能用于对应原消息，不能代替后来消息中的附件。
