@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 from typing import Any, ClassVar, cast
@@ -10,10 +10,9 @@ import asyncio
 import json
 import uuid
 
-from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase, Tool
+from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
-from .text_splitter import split_reply
 
 PRIVATE_MESSAGE_SETTLE_SECONDS = 2.0
 SEARCH_RULE = (
@@ -29,24 +28,18 @@ MEMORY_RULE = (
     "只有真实合并转发才使用该工具；原文缺失时说明未取得，不能猜测。[/记忆与引用规则]"
 )
 REPLY_RULE = (
-    "[公开答复规则]send_reply 直接发送你已经写好的对外答复，不再调用模型改写；"
-    "text 必须是符合原有人设、可独立阅读的答复，不是分析、草稿或内部推理。"
-    "已经能可靠回答的普通聊天可直接用它；需要原生回复器组织表达或发送附件时继续用 reply。"
-    "同一段答复在 send_reply 和 reply 之间二选一；send_reply 已经完成发言，不要再调用 reply 重述。"
-    "复杂任务可以先发送有帮助且已确认的部分，phase=progress，再继续查询或研究，"
-    "有新增证据后再发补充；未查到的事实不能先当结论，不要用空泛的‘正在思考’凑首条回复。"
-    "简单聊天不强制分段，不重复已经发过的内容。发送工具不会结束思考；"
-    "已能回答的部分不必等无依赖的状态记账或工具发现完成，可先发答复再处理这些工具。"
-    "依赖工具结果的结论仍须等待结果。查询失败时说明已有结论和缺失证据；"
-    "只有新线索、不同核验方法或可恢复的临时错误才值得重试，不在相同失败请求上空转。"
-    "需求完成或本轮已明确无法继续核实时如实收尾，不能把缺少证据写成查证成功。"
-    "默认 phase=answer；仍有明确的查询或研究待做时才用 progress。[/公开答复规则]"
+    "[原生回复规则]公开答复通过原生 reply 生成，由回复器结合完整人设、聊天记录和已核验资料组织正文。"
+    "复杂任务已有可靠且有用的阶段结论时，可以先调用 reply，在 reply_reference 中说明已确认事实和本次仅需回应的部分，"
+    "随后继续查询或研究，有新增证据后再补充。依赖工具结果的结论必须等待结果，不把未核实的推测写成事实。"
+    "简单聊天正常回答，不机械报进度，不重复已经发过的内容，不发送内部分析。"
+    "查询失败时说明已有结论和缺失证据；只有新线索、不同核验方法或可恢复的临时错误才重试。"
+    "需求完成或本轮已明确无法继续核实时如实收尾。[/原生回复规则]"
 )
 
 class PluginSection(PluginConfigBase):
     """私聊回复执行检查的启用状态。"""
 
-    enabled: bool = Field(default=False, description="是否启用私聊公开答复与漏执行核对")
+    enabled: bool = Field(default=False, description="是否核对私聊规划遗漏的回复调用")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -72,22 +65,13 @@ class PendingReply:
     reply_tool: dict[str, Any]
 
 
-@dataclass
-class ReplyTurn:
-    """同一条主人消息的公开答复及发送回执；新消息到来后整体替换。"""
-
-    session_id: str
-    message_id: str
-    receipts: dict[str, dict[str, object]] = field(default_factory=dict)
-
-
 def _meta(turn_id: str | None = None) -> dict[str, object]:
     """生成公开 Context Item schema 1 要求的唯一标识和时间。"""
     return {"item_id": uuid.uuid4().hex, "logical_turn_id": turn_id, "timestamp": datetime.now().isoformat()}
 
 
 class QQBotReplyGuardPlugin(MaiBotPlugin):
-    """发送已写好的主人私聊答复，并核对原生回复调用的遗漏。"""
+    """核对尚未回复的主人私聊规划，通过原生 reply 执行已决定的回应。"""
 
     config_model: ClassVar[type[PluginConfigBase] | None] = GuardConfig
 
@@ -97,68 +81,54 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         self._pending: PendingReply | None = None
         self._retried_message_id = ""
         self._settled_message_id = ""
-        self._reply_turn: ReplyTurn | None = None
-        self._send_lock = asyncio.Lock()
         self.ctx.logger.info("私聊回复执行检查已加载，启用=%s", cast(GuardConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
-        """关闭未开始的发送；已经交给平台的消息由原生发送管线完成。"""
+        """丢弃未完成快照；插件没有后台任务或持久化状态。"""
         self._active = False
         self._pending = None
-        self._reply_turn = None
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
         """配置变化后废弃旧目标，保留本进程已核对消息的去重标识。"""
         del config_data, version
         if scope == CONFIG_RELOAD_SCOPE_SELF:
             self._pending = None
-            self._reply_turn = None
 
-    async def _owner_messages(self, session_id: str) -> tuple[str, list[Mapping[str, Any]]]:
-        """核对真实主人私聊并读取最近消息；保留机器人消息以识别续答和过期目标。"""
+    async def _pending_message_id(self, session_id: str) -> str:
+        """只接受身份配置对应的 QQ 私聊，且最近消息必须仍由主人发送。"""
         config = cast(GuardConfig, self.config)
         if not self._active or not config.plugin.enabled or not session_id:
-            return "", []
+            return ""
         if await self.ctx.config.get("bot.qq_account", "") != config.guard.bot_qq:
-            return "", []
+            return ""
         identity = await self.ctx.config.get_plugin("mlj.qqbot-identity")
-        identity_plugin = identity.get("plugin")
-        if not isinstance(identity_plugin, Mapping) or identity_plugin.get("enabled") is not True:
-            return "", []
         section = identity.get("identity")
         owner = section.get("owner_qq") if isinstance(section, Mapping) else None
         if not isinstance(owner, str) or not owner.isdecimal() or owner == config.guard.bot_qq:
-            return "", []
+            return ""
         stream = await self.ctx.chat.get_stream_by_user_id(owner, platform="qq")
         if not isinstance(stream, Mapping) or stream.get("stream_id") != session_id:
-            return "", []
+            return ""
         if stream.get("platform") != "qq" or stream.get("group_id") or stream.get("user_id") != owner:
-            return "", []
+            return ""
         messages = await self.ctx.call_capability(
-            "message.get_recent", chat_id=session_id, limit=20, filter_mai=False, include_binary_data=False
+            "message.get_recent", chat_id=session_id, limit=1, filter_mai=False, include_binary_data=False
         )
         if not isinstance(messages, list):
             raise ValueError("私聊回复执行检查没有收到消息列表")
-        for message in messages:
-            if not isinstance(message, Mapping) or message.get("session_id") != session_id or message.get("platform") != "qq":
-                raise ValueError("私聊消息列表包含不匹配的会话")
-            info = message.get("message_info")
-            sender = info.get("user_info") if isinstance(info, Mapping) else None
-            if not isinstance(info, Mapping) or info.get("group_info") or not isinstance(sender, Mapping):
-                raise ValueError("私聊消息缺少真实发送者")
-            if sender.get("user_id") not in (owner, config.guard.bot_qq):
-                raise ValueError("私聊消息包含不匹配的发送者")
-        if not self._active or config is not self.config or not config.plugin.enabled:
-            return "", []
-        return owner, messages
-
-    async def _pending_message_id(self, session_id: str) -> str:
-        """只有最近一条消息仍来自主人时，才允许原生漏回复核对。"""
-        owner, messages = await self._owner_messages(session_id)
-        if not messages or messages[-1]["message_info"]["user_info"]["user_id"] != owner:
+        if not messages:
             return ""
-        message_id = messages[-1].get("message_id")
-        return message_id if isinstance(message_id, str) else ""
+        message = messages[-1]
+        if not isinstance(message, Mapping) or message.get("session_id") != session_id or message.get("platform") != "qq":
+            return ""
+        info = message.get("message_info")
+        sender = info.get("user_info") if isinstance(info, Mapping) else None
+        if not isinstance(info, Mapping) or info.get("group_info") or not isinstance(sender, Mapping):
+            return ""
+        message_id = message.get("message_id")
+        if sender.get("user_id") != owner or not isinstance(message_id, str):
+            return ""
+        return message_id if self._active and config is self.config and config.plugin.enabled else ""
 
     async def _quote_context(self, session_id: str, message_id: str) -> str:
         """只展开本轮消息的同会话普通引用，不递归或持久化引用正文。"""
@@ -214,33 +184,17 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         self, session_id: str = "", items: object = None, tool_definitions: object = None,
         item_schema_version: int = 0, **kwargs: Any,
     ) -> dict[str, object]:
-        """只向真实主人私聊提供直接答复；原生漏执行核对仍仅处理尚未回复的消息。"""
-        if item_schema_version != 1 or not isinstance(items, list) or not isinstance(tool_definitions, list):
-            return {"action": "continue"}
-        # 工具注册为可见，其他会话在请求 Hook 中移除，避免让模型选择一个不能使用的入口。
-        tools: list[dict[str, Any]] = []
-        direct: dict[str, Any] | None = None
-        for tool in tool_definitions:
-            if not isinstance(tool, dict):
-                raise ValueError("规划工具定义必须是对象")
-            function = tool.get("function")
-            if isinstance(function, Mapping) and function.get("name") == "send_reply":
-                direct = cast(dict[str, Any], tool)
-            else:
-                tools.append(cast(dict[str, Any], tool))
-        modified = {
-            **kwargs, "session_id": session_id, "items": items,
-            "tool_definitions": tools, "item_schema_version": item_schema_version,
-        }
+        """仅对真实待回复消息添加协议提醒，不修改用户的人设或历史内容。"""
         if self._pending is not None and self._pending.session_id == session_id:
             self._pending = None
         async with asyncio.timeout(3):
-            owner, messages = await self._owner_messages(session_id)
-        source = next((message for message in reversed(messages)
-                       if message["message_info"]["user_info"]["user_id"] == owner), None)
-        message_id = source.get("message_id") if source is not None else None
-        if not isinstance(message_id, str) or not message_id:
-            return {"action": "continue", "modified_kwargs": modified}
+            message_id = await self._pending_message_id(session_id)
+        if not message_id:
+            return {"action": "continue"}
+        if item_schema_version != 1 or not isinstance(items, list) or not isinstance(tool_definitions, list):
+            raise ValueError("私聊回复执行检查需要 Context Item schema 1 和工具列表")
+        # 身份来自消息 API；这里只核对真实消息 ID 是否已进入本轮上下文，
+        # 防止 Hook 查询到了刚到达、但原规划尚未看到的新消息。
         prefix = f'<message msg_id="{escape(message_id, quote=True)}" '
         present = False
         for item in items:
@@ -254,45 +208,44 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
                 present = True
                 break
         if not present:
-            if self._reply_turn is not None and self._reply_turn.session_id == session_id:
-                self._reply_turn = None
-            return {"action": "continue", "modified_kwargs": modified}
+            return {"action": "continue"}
         reply_tool: dict[str, Any] | None = None
-        for tool in tools:
+        for tool in tool_definitions:
+            if not isinstance(tool, dict):
+                continue
             function = tool.get("function")
             if isinstance(function, Mapping) and function.get("name") == "reply":
-                reply_tool = tool
+                reply_tool = cast(dict[str, Any], tool)
                 break
         if reply_tool is None:
-            return {"action": "continue", "modified_kwargs": modified}
-        turn = self._reply_turn
-        if turn is None or turn.session_id != session_id or turn.message_id != message_id:
-            self._reply_turn = ReplyTurn(session_id, message_id)
-        pending = messages[-1]["message_info"]["user_info"]["user_id"] == owner
-        if pending and self._settled_message_id != message_id:
-            # 留出一次连发窗口；续答同一消息不再重复等待。
+            return {"action": "continue"}
+        if self._settled_message_id != message_id:
+            # 本轮已绑定原生 Planner 中断标记。留出连发窗口；新消息到来后
+            # 由原生中断流程重新收集上下文，不把未进入本轮的消息拼入旧请求。
             self._settled_message_id = message_id
             await asyncio.sleep(PRIVATE_MESSAGE_SETTLE_SECONDS)
             async with asyncio.timeout(3):
                 if await self._pending_message_id(session_id) != message_id:
-                    return {"action": "continue", "modified_kwargs": modified}
+                    return {"action": "continue"}
         async with asyncio.timeout(3):
             quoted = await self._quote_context(session_id, message_id)
-        if pending:
-            self._pending = PendingReply(session_id, message_id, reply_tool)
-        if direct is not None:
-            tools = [*tools, direct]
+        self._pending = PendingReply(session_id, message_id, reply_tool)
         rule = {
-            "item_type": "SystemMessageItem", "meta": _meta(),
+            "item_type": "SystemMessageItem",
+            "meta": _meta(),
             "parts": [{"type": "text", "text": (
-                "[私聊执行规则]分析文字不会发送给对方。决定回应当前消息时，实际调用 send_reply 或 reply；"
-                "决定等待或保持安静时不调用发送工具。将连续消息作为同一轮表达理解，结合最新补充回应，"
-                "不逐条抢答、不重复已经完成的答复。[/私聊执行规则]"
-                + REPLY_RULE + SEARCH_RULE + MEMORY_RULE + quoted
+                "[私聊执行规则]分析文字不会发送给对方。决定回应当前消息时，必须实际调用 reply；"
+                "写下准备回复、直接回答、无需查询工具等分析不等于已经发言。"
+                "reply 本身也是工具，与信息查询工具不同。决定等待或保持安静时，不调用 reply，也不补发回复。"
+                "将对方连续发来的消息作为同一轮表达一起理解，结合最新补充再决定是否和何时回应。"
+                "不必逐条回答，不要对已经被后续消息修正的旧片段单独作答。"
+                "对方还在补充、只有简单应声或没有新内容时，可以等待或保持安静。"
+                "已完成的回复不要重复执行。[/私聊执行规则]" + REPLY_RULE + SEARCH_RULE + MEMORY_RULE + quoted
             )}],
         }
         return {"action": "continue", "modified_kwargs": {
-            **modified, "items": [*items, rule], "tool_definitions": tools,
+            **kwargs, "session_id": session_id, "items": [*items, rule],
+            "tool_definitions": tool_definitions, "item_schema_version": item_schema_version,
         }}
 
     @HookHandler(
@@ -319,100 +272,6 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
             "extra_prompt": "\n".join(part for part in (extra_prompt, SEARCH_RULE, MEMORY_RULE, quoted) if part),
         }}
 
-    async def _reply_target_current(self, turn: ReplyTurn) -> bool:
-        """每段发送前核对目标；机器人已发出的前几段不影响同源续发。"""
-        async with asyncio.timeout(3):
-            owner, messages = await self._owner_messages(turn.session_id)
-        latest = next((message for message in reversed(messages)
-                       if message["message_info"]["user_info"]["user_id"] == owner), None)
-        return (latest is not None and latest.get("message_id") == turn.message_id
-                and self._reply_turn is turn and self._active)
-
-    async def _reply_parts(self, text: str) -> list[str]:
-        """只复用现有分段开关和条数上限，不复用会改写或替换正文的处理。"""
-        async with asyncio.timeout(3):
-            enabled = await self.ctx.config.get("response_post_process.enable_response_post_process")
-            splitter_enabled = await self.ctx.config.get("response_splitter.enable")
-            if not isinstance(enabled, bool) or not isinstance(splitter_enabled, bool):
-                raise ValueError("回复分段配置缺少有效开关")
-            if not enabled or not splitter_enabled:
-                return [text]
-            limit = await self.ctx.config.get("response_splitter.max_split_num")
-        if type(limit) is not int or limit < 1:
-            raise ValueError("回复分段条数上限必须是正整数")
-        return split_reply(text, limit)
-
-    @Tool(
-        "send_reply",
-        description="直接发送已经写好的公开答复；可以先发有用的阶段结论，再继续研究。不要发送内部分析。",
-        parameters={
-            "msg_id": {"type": "string", "required": True, "description": "本轮最新主人消息的 msg_id，续答仍使用相同 ID"},
-            "text": {"type": "string", "required": True, "minLength": 1, "maxLength": 2000,
-                     "description": "符合完整人设、证据充分、可直接公开的答复正文；长文或附件可用原生 reply"},
-            "phase": {"type": "string", "enum": ["progress", "answer"], "default": "answer",
-                      "description": "仍有明确查询或研究待做时用 progress；普通答复或完成后的补充用 answer"},
-        }, visibility="visible", chat_scope="private", timeout_ms=180000,
-    )
-    async def send_reply(
-        self, msg_id: object = "", text: object = "", phase: object = "answer", **kwargs: Any,
-    ) -> dict[str, object]:
-        """经消息 API 再核对目标后发送；同文去重，失败或取消不自动重发，成功同步原生历史和记忆。"""
-        if not isinstance(msg_id, str) or not isinstance(text, str) or not 0 < len(text.strip()) <= 2000:
-            return {"success": False, "content": "需要真实消息 ID 和 1–2000 字的公开答复；长答复请使用 reply。"}
-        if phase not in ("progress", "answer"):
-            return {"success": False, "content": "答复阶段只能是 progress 或 answer。"}
-        text = text.strip()
-        session_id = str(kwargs.get("stream_id") or "")
-        async with self._send_lock:
-            turn = self._reply_turn
-            if (turn is None or turn.session_id != session_id or turn.message_id != msg_id
-                    or kwargs.get("group_id")):
-                return {"success": False, "content": "只能答复本轮已经核验的主人私聊消息。"}
-            if not await self._reply_target_current(turn):
-                return {"success": False, "content": "主人消息或配置已经变化，旧答复未发送；请结合最新消息重新判断。"}
-            if text in turn.receipts:
-                return turn.receipts[text]
-            try:
-                parts = await self._reply_parts(text)
-            except Exception as exc:
-                self.ctx.logger.warning("公开答复分段配置不可用: error_type=%s", type(exc).__name__)
-                return {"success": False, "content": "无法确认回复分段配置，本次未发送；请先检查分段配置。"}
-            # 全文共享回执，每确认一段就更新；取消或连接中断不代表该段没有发出。
-            message_ids: list[str] = []
-            receipt: dict[str, object] = {
-                "success": False, "sent_parts": 0, "total_parts": len(parts), "message_ids": message_ids,
-                "content": "本次发送结果尚不能确认；部分消息可能已经发出，不要重发全文，先查看最新消息。",
-            }
-            turn.receipts[text] = receipt
-            try:
-                async with asyncio.timeout(150):
-                    for index, part in enumerate(parts):
-                        if not await self._reply_target_current(turn):
-                            receipt["content"] = f"主人消息或配置已经变化，停止续发；已确认 {index}/{len(parts)} 段，不要重发全文。"
-                            return receipt
-                        result = await self.ctx.send.text(
-                            part, session_id, typing=True, set_reply=False, storage_message=True,
-                            sync_to_maisaka_history=True, maisaka_source_kind="outbound_send", return_details=True, timeout_ms=150000,
-                        )
-                        if not isinstance(result, Mapping) or result.get("sent") is not True:
-                            receipt["content"] = f"平台未确认第 {index + 1} 段成功，已确认 {index}/{len(parts)} 段；停止续发，不要重发全文。"
-                            return receipt
-                        message_id = result.get("message_id")
-                        if isinstance(message_id, str) and message_id:
-                            message_ids.append(message_id)
-                        receipt.update(sent_parts=index + 1, message_id=message_id)
-            except Exception as exc:
-                self.ctx.logger.warning("公开答复发送结果未确认: sent_parts=%s total_parts=%s error_type=%s",
-                                        receipt["sent_parts"], len(parts), type(exc).__name__)
-                return receipt
-            receipt.update(
-                success=True, phase=phase,
-                content="答复已分段发送并写入聊天历史；继续尚未完成的查询或研究，有新增结论再补充，不要复述已发送内容。"
-                        if phase == "progress" else "答复已发送并写入聊天历史；需求已完成时结束，不要重复发送。",
-            )
-            self.ctx.logger.info("公开答复已发送: phase=%s chars=%s parts=%s", phase, len(text), len(parts))
-            return receipt
-
     @HookHandler(
         "maisaka.planner.after_response",
         name="qqbot_reply_guard_complete",
@@ -425,33 +284,7 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
     async def complete_reply(
         self, session_id: str = "", output_items: object = None, item_schema_version: int = 0, **kwargs: Any,
     ) -> dict[str, object]:
-        """去除同批重复的最终回复入口，或补一次遗漏的原生 reply；不改变研究工具与阶段续答。"""
-        turn = self._reply_turn
-        if item_schema_version == 1 and isinstance(output_items, list) and turn is not None and turn.session_id == session_id:
-            calls = []
-            direct_answer = False
-            for item in output_items:
-                call = item.get("tool_call") if isinstance(item, Mapping) and item.get("item_type") == "FunctionCallItem" else None
-                if not isinstance(call, Mapping):
-                    continue
-                args = call.get("args")
-                if not isinstance(args, Mapping) or args.get("msg_id") != turn.message_id:
-                    continue
-                text = args.get("text")
-                if (call.get("func_name") == "send_reply" and args.get("phase", "answer") == "answer"
-                        and isinstance(text, str) and 0 < len(text.strip()) <= 2000):
-                    direct_answer = True
-                elif call.get("func_name") == "reply" and not any(
-                    args.get(name) for name in ("attach_pic", "attach_emoji", "attach_at")
-                ):
-                    calls.append(item)
-            if direct_answer and calls:
-                self._pending = None
-                self.ctx.logger.info("同批最终答复已选择直接发送，移除同目标的重复 reply 调用")
-                return {"action": "continue", "modified_kwargs": {
-                    **kwargs, "session_id": session_id, "item_schema_version": item_schema_version,
-                    "output_items": [item for item in output_items if item not in calls],
-                }}
+        """只补一次明确的 reply 调用；新消息、静默结果、失败均保留原生处理。"""
         pending = self._pending
         if pending is None or pending.session_id != session_id:
             return {"action": "continue"}
