@@ -30,4 +30,4 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 90 秒；拍一拍使用 `utils` 任务并提供相同输出余量。官网搜索使用独立的 32768 输出上限。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
 
-[qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md) 允许直接发送已写好的公开正文，也可先发可靠阶段结论再继续研究；原生 Replyer 保留，用于媒体、引用、附件及需要再次组织表达的场景。[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 使首条等待扣除已处理时间，后续按原速度发送。`[chat.reply_timing].planner_interrupt_max_consecutive_count = 10` 允许新消息打断 Planner 后重新收集上下文；不取消已经进入 Replyer 或发送阶段的任务。
+[qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md) 提供原生回复与研究续轮规则；普通及阶段答复统一使用原生 `reply`，保留完整人设、回复器、后处理分段和原有发送流程。[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 只按后处理后的第一段文字计算首条等待，再扣除本轮已耗时，后续分段及研究补充按原速度发送。`[chat.reply_timing].planner_interrupt_max_consecutive_count = 10` 允许新消息打断 Planner 后重新收集上下文；不取消已经进入 Replyer 或发送阶段的任务。
