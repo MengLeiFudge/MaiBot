@@ -28,6 +28,6 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `provider.example.toml` 的生成 provider 使用本机 CPA 地址 `http://127.0.0.1:8317/v1` 与 CPA 客户端密钥。联网搜索单独使用官网凭据，部署方法见 [qqbot_web_search](../../plugins/qqbot_web_search/README.md)；嵌入 provider 保留原百炼接口，CPA 支持 `/embeddings` 前不能一起替换地址。
 
-`provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "max"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 90 秒；拍一拍使用 `utils` 任务并提供相同输出余量。官网搜索使用独立的 32768 输出上限。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
+`provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "high"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 90 秒；拍一拍使用 `utils` 任务并提供相同输出余量。官网搜索使用独立的 32768 输出上限。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
 
-[qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md) 提供原生回复与研究续轮规则；普通及阶段答复统一使用原生 `reply`，保留完整人设、回复器、后处理分段和原有发送流程。[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 只按后处理后的第一段文字计算首条等待，再扣除本轮已耗时，后续分段及研究补充按原速度发送。`[chat.reply_timing].planner_interrupt_max_consecutive_count = 10` 允许新消息打断 Planner 后重新收集上下文；不取消已经进入 Replyer 或发送阶段的任务。
+[qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md) 提供原生回复与研究续轮规则；普通及阶段答复统一使用原生 `reply`，保留完整人设、回复器、后处理分段和原有发送流程。[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 补齐本账号出站消息缺少的 NapCat 连接标识，并按后处理后的第一段文字计算首条等待，再扣除本轮已耗时，后续分段及研究补充按原速度发送。`[chat.reply_timing].planner_interrupt_max_consecutive_count = 10` 允许新消息打断 Planner 后重新收集上下文；不取消已经进入 Replyer 或发送阶段的任务。
