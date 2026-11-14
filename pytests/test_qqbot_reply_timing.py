@@ -86,11 +86,12 @@ class ReplyTimingTests(IsolatedAsyncioTestCase):
         await self.plugin.before_send(message=self.outbound("delivery-2"), typing=True)
         self.assertAlmostEqual(self.waits[-1], 2.6)
 
-    async def test_unplanned_received_message_does_not_replace_active_turn(self):
+    async def test_new_message_not_yet_in_context_aborts_old_first_segment(self):
         self.clock += 5
         await self.plugin.receive(message={"session_id": "session", "platform": "qq", "message_id": "not-in-context"})
         await self.prepare("source-1")
-        await self.plugin.before_send(message=self.outbound(), typing=True)
+        result = await self.plugin.before_send(message=self.outbound(), typing=True)
+        self.assertEqual(result, {"action": "abort"})
         self.assertEqual(self.waits, [])
 
     async def test_unknown_outcome_keeps_claim_but_explicit_failure_releases(self):
@@ -154,3 +155,32 @@ class ReplyTimingTests(IsolatedAsyncioTestCase):
         """没有后处理正文的插件通知不被改成模拟打字。"""
         result = await self.plugin.prepare_segment(message=self.outbound(), processed_plain_text="", typing=False)
         self.assertNotIn("modified_kwargs", result)
+
+    async def test_new_message_wakes_first_wait_without_finishing_delay(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def blocked_sleep(seconds):
+            entered.set()
+            await release.wait()
+        with patch.object(module, "asyncio", SimpleNamespace(sleep=blocked_sleep)):
+            task = asyncio.create_task(self.plugin.before_send(message=self.outbound(), typing=True))
+            await asyncio.wait_for(entered.wait(), 1)
+            await self.plugin.receive(message={"session_id": "session", "platform": "qq", "message_id": "source-2"})
+            self.assertEqual(await asyncio.wait_for(task, 1), {"action": "abort"})
+        self.assertFalse(release.is_set())
+        self.assertIsNone(self.plugin._turns["session"].wait_task)
+
+    async def test_new_message_during_first_wait_aborts_but_later_segments_continue(self):
+        async def receive_during_wait(seconds):
+            await self.plugin.receive(message={"session_id": "session", "platform": "qq", "message_id": "source-2"})
+        with patch.object(module, "asyncio", SimpleNamespace(sleep=receive_during_wait)):
+            result = await self.plugin.before_send(message=self.outbound(), typing=True)
+        self.assertEqual(result, {"action": "abort"})
+        self.assertEqual(self.plugin._turns["session"].first_delivery_id, "")
+        await self.prepare("source-2")
+        self.clock += 5
+        first = self.outbound("new-first")
+        await self.plugin.before_send(message=first, typing=True)
+        await self.plugin.after_send(message=first, sent=True)
+        await self.plugin.receive(message={"session_id": "session", "platform": "qq", "message_id": "source-3"})
+        later = await self.plugin.before_send(message=self.outbound("second"), typing=True)
+        self.assertEqual(later, {"action": "continue"})
