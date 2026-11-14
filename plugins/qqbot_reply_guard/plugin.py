@@ -13,6 +13,7 @@ import uuid
 from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
+from .text_splitter import split_reply
 
 PRIVATE_MESSAGE_SETTLE_SECONDS = 2.0
 SEARCH_RULE = (
@@ -318,6 +319,29 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
             "extra_prompt": "\n".join(part for part in (extra_prompt, SEARCH_RULE, MEMORY_RULE, quoted) if part),
         }}
 
+    async def _reply_target_current(self, turn: ReplyTurn) -> bool:
+        """每段发送前核对目标；机器人已发出的前几段不影响同源续发。"""
+        async with asyncio.timeout(3):
+            owner, messages = await self._owner_messages(turn.session_id)
+        latest = next((message for message in reversed(messages)
+                       if message["message_info"]["user_info"]["user_id"] == owner), None)
+        return (latest is not None and latest.get("message_id") == turn.message_id
+                and self._reply_turn is turn and self._active)
+
+    async def _reply_parts(self, text: str) -> list[str]:
+        """只复用现有分段开关和条数上限，不复用会改写或替换正文的处理。"""
+        async with asyncio.timeout(3):
+            enabled = await self.ctx.config.get("response_post_process.enable_response_post_process")
+            splitter_enabled = await self.ctx.config.get("response_splitter.enable")
+            if not isinstance(enabled, bool) or not isinstance(splitter_enabled, bool):
+                raise ValueError("回复分段配置缺少有效开关")
+            if not enabled or not splitter_enabled:
+                return [text]
+            limit = await self.ctx.config.get("response_splitter.max_split_num")
+        if type(limit) is not int or limit < 1:
+            raise ValueError("回复分段条数上限必须是正整数")
+        return split_reply(text, limit)
+
     @Tool(
         "send_reply",
         description="直接发送已经写好的公开答复；可以先发有用的阶段结论，再继续研究。不要发送内部分析。",
@@ -344,40 +368,49 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
             if (turn is None or turn.session_id != session_id or turn.message_id != msg_id
                     or kwargs.get("group_id")):
                 return {"success": False, "content": "只能答复本轮已经核验的主人私聊消息。"}
-            async with asyncio.timeout(3):
-                owner, messages = await self._owner_messages(session_id)
-            latest = next((message for message in reversed(messages)
-                           if message["message_info"]["user_info"]["user_id"] == owner), None)
-            if (latest is None or latest.get("message_id") != msg_id or self._reply_turn is not turn
-                    or not self._active):
+            if not await self._reply_target_current(turn):
                 return {"success": False, "content": "主人消息或配置已经变化，旧答复未发送；请结合最新消息重新判断。"}
             if text in turn.receipts:
                 return turn.receipts[text]
-            # 在请求发出前占用去重记录。连接中断或取消时无法证明未发送，不能自动再发同文。
-            uncertain: dict[str, object] = {
-                "success": False, "content": "本次发送结果尚不能确认；不要重复发送相同正文，先查看最新消息。",
-            }
-            turn.receipts[text] = uncertain
             try:
-                async with asyncio.timeout(150):
-                    result = await self.ctx.send.text(
-                        text, session_id, typing=True, set_reply=False, storage_message=True,
-                        sync_to_maisaka_history=True, maisaka_source_kind="outbound_send", return_details=True, timeout_ms=150000,
-                    )
+                parts = await self._reply_parts(text)
             except Exception as exc:
-                self.ctx.logger.warning("公开答复发送结果未确认: error_type=%s", type(exc).__name__)
-                return uncertain
-            if not isinstance(result, Mapping) or result.get("sent") is not True:
-                failed: dict[str, object] = {"success": False, "content": "平台没有确认发送成功，请先查看最新消息再决定后续动作。"}
-                turn.receipts[text] = failed
-                return failed
+                self.ctx.logger.warning("公开答复分段配置不可用: error_type=%s", type(exc).__name__)
+                return {"success": False, "content": "无法确认回复分段配置，本次未发送；请先检查分段配置。"}
+            # 全文共享回执，每确认一段就更新；取消或连接中断不代表该段没有发出。
+            message_ids: list[str] = []
             receipt: dict[str, object] = {
-                "success": True, "message_id": result.get("message_id"), "phase": phase,
-                "content": "答复已发送并写入聊天历史；继续尚未完成的查询或研究，有新增结论再补充，不要复述已发送内容。"
-                           if phase == "progress" else "答复已发送并写入聊天历史；需求已完成时结束，不要重复发送。",
+                "success": False, "sent_parts": 0, "total_parts": len(parts), "message_ids": message_ids,
+                "content": "本次发送结果尚不能确认；部分消息可能已经发出，不要重发全文，先查看最新消息。",
             }
             turn.receipts[text] = receipt
-            self.ctx.logger.info("公开答复已发送: phase=%s chars=%s", phase, len(text))
+            try:
+                async with asyncio.timeout(150):
+                    for index, part in enumerate(parts):
+                        if not await self._reply_target_current(turn):
+                            receipt["content"] = f"主人消息或配置已经变化，停止续发；已确认 {index}/{len(parts)} 段，不要重发全文。"
+                            return receipt
+                        result = await self.ctx.send.text(
+                            part, session_id, typing=True, set_reply=False, storage_message=True,
+                            sync_to_maisaka_history=True, maisaka_source_kind="outbound_send", return_details=True, timeout_ms=150000,
+                        )
+                        if not isinstance(result, Mapping) or result.get("sent") is not True:
+                            receipt["content"] = f"平台未确认第 {index + 1} 段成功，已确认 {index}/{len(parts)} 段；停止续发，不要重发全文。"
+                            return receipt
+                        message_id = result.get("message_id")
+                        if isinstance(message_id, str) and message_id:
+                            message_ids.append(message_id)
+                        receipt.update(sent_parts=index + 1, message_id=message_id)
+            except Exception as exc:
+                self.ctx.logger.warning("公开答复发送结果未确认: sent_parts=%s total_parts=%s error_type=%s",
+                                        receipt["sent_parts"], len(parts), type(exc).__name__)
+                return receipt
+            receipt.update(
+                success=True, phase=phase,
+                content="答复已分段发送并写入聊天历史；继续尚未完成的查询或研究，有新增结论再补充，不要复述已发送内容。"
+                        if phase == "progress" else "答复已发送并写入聊天历史；需求已完成时结束，不要重复发送。",
+            )
+            self.ctx.logger.info("公开答复已发送: phase=%s chars=%s parts=%s", phase, len(text), len(parts))
             return receipt
 
     @HookHandler(
