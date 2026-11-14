@@ -46,4 +46,4 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 人物事实写回由原生 `MemoryAutomationService.on_message_sent` 按每条已发送消息触发，`person_fact_writeback_enabled` 仅控制启停。调整聊天摘要窗口或重试次数，不会改变这项按发送消息触发的行为。维护此行为前须核对公开 Hook 与记忆写入能力；当前接口没有人物事实队列 Hook 或对应写入 API，因此保留原生提取，不用关闭记忆、改框架核心或数据库直写替代合并。
 
-回复延迟先区分 `llm_usage` 的模型时间、`maisaka_monitor_events` 的 Planner/工具时间和回复工具内 `detail.metrics`。蓝铃的 `response_post_process.typing_speed = 0.2` 缩短原生回复器完成后的模拟打字等待；直接公开答复的质量、研究续轮与测量规则统一见 [qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md)。Planner 的阶段时间还包含记忆印象整理，不能把它等同于主模型耗时；行为分析超时也可能延长部分回合。
+回复延迟先区分 `llm_usage` 的模型时间、`maisaka_monitor_events` 的 Planner/工具时间和回复工具内 `detail.metrics`。蓝铃的 `response_post_process.typing_speed = 0.2` 控制后续消息的模拟打字速度；[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 只从首条等待扣除本轮已经经过的处理时间。直接公开答复也经过这条发送路径，质量、研究续轮与测量规则见 [qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md)。Planner 的阶段时间还包含记忆印象整理，不能把它等同于主模型耗时；行为分析超时也可能延长部分回合。

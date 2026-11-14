@@ -327,7 +327,7 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
                      "description": "符合完整人设、证据充分、可直接公开的答复正文；长文或附件可用原生 reply"},
             "phase": {"type": "string", "enum": ["progress", "answer"], "default": "answer",
                       "description": "仍有明确查询或研究待做时用 progress；普通答复或完成后的补充用 answer"},
-        }, visibility="visible", chat_scope="private", timeout_ms=20000,
+        }, visibility="visible", chat_scope="private", timeout_ms=180000,
     )
     async def send_reply(
         self, msg_id: object = "", text: object = "", phase: object = "answer", **kwargs: Any,
@@ -359,10 +359,10 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
             }
             turn.receipts[text] = uncertain
             try:
-                async with asyncio.timeout(15):
+                async with asyncio.timeout(150):
                     result = await self.ctx.send.text(
-                        text, session_id, typing=False, set_reply=False, storage_message=True,
-                        sync_to_maisaka_history=True, maisaka_source_kind="outbound_send", return_details=True,
+                        text, session_id, typing=True, set_reply=False, storage_message=True,
+                        sync_to_maisaka_history=True, maisaka_source_kind="outbound_send", return_details=True, timeout_ms=150000,
                     )
             except Exception as exc:
                 self.ctx.logger.warning("公开答复发送结果未确认: error_type=%s", type(exc).__name__)

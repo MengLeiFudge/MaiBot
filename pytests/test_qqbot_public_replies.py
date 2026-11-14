@@ -126,7 +126,7 @@ class PublicReplyTests(IsolatedAsyncioTestCase):
             self.assertTrue(sent["sync_to_maisaka_history"])
             self.assertTrue(sent["storage_message"])
             self.assertEqual(sent["maisaka_source_kind"], "outbound_send")
-            self.assertFalse(sent["typing"])
+            self.assertTrue(sent["typing"])
             self.assertFalse(sent["set_reply"])
 
     async def test_concurrent_duplicate_sends_once(self) -> None:
