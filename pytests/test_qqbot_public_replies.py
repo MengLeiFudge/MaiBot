@@ -200,3 +200,37 @@ class PublicReplyTests(IsolatedAsyncioTestCase):
         prompt = replyer["modified_kwargs"]["extra_prompt"]
         self.assertIn("原有要求", prompt)
         self.assertIn("此前已经核验的公开内容", prompt)
+
+    async def test_settle_window_credits_elapsed_preparation_and_preserves_new_message_check(self) -> None:
+        """慢准备不重复等两秒；快准备补足窗口，等待中新消息仍废弃旧目标。"""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from plugins.qqbot_reply_guard import plugin as module
+        waits = []
+        clock = [100.0]
+        async def sleep(seconds):
+            waits.append(seconds)
+            clock[0] += seconds
+        with patch.object(module, "time", SimpleNamespace(monotonic=lambda: clock[0])):
+            await self.plugin.receive(message=self.host.messages[-1])
+            self.plugin._settled_message_id = ""
+            clock[0] += 5
+            with patch.object(module.asyncio, "sleep", sleep):
+                await self.prepare()
+            self.assertEqual(waits, [])
+            self.host.messages.append(message("source-2"))
+            await self.plugin.receive(message=self.host.messages[-1])
+            clock[0] += 0.5
+            await self.plugin.receive(message=self.host.messages[-1])
+            with patch.object(module.asyncio, "sleep", sleep):
+                await self.prepare("source-2")
+            self.assertEqual(waits, [1.5])
+            self.host.messages.append(message("source-3"))
+            await self.plugin.receive(message=self.host.messages[-1])
+            async def receive_new(seconds):
+                self.host.messages.append(message("source-4"))
+                await self.plugin.receive(message=self.host.messages[-1])
+            with patch.object(module.asyncio, "sleep", receive_new):
+                result = await self.prepare("source-3")
+            self.assertEqual(result, {"action": "continue"})
+            self.assertIsNone(self.plugin._pending)

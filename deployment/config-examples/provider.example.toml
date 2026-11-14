@@ -31,9 +31,9 @@ cache_price_in = 0.1
 visual = true
 force_stream_mode = false
 
-# 规划、回复、识图与其他文本辅助任务统一使用 max 思考。
+# 规划、回复、识图与其他文本辅助任务统一使用 high 思考。
 [models.extra_params.reasoning]
-effort = "max"
+effort = "high"
 
 # 联网搜索使用 qqbot_web_search 函数工具，不向 CPA 附加原生 web_search。
 
@@ -51,7 +51,7 @@ force_stream_mode = false
 
 [models.extra_params.reasoning]
 # 原生 Responses 客户端将 extra_params.reasoning 传入请求体。
-effort = "max"
+effort = "high"
 
 # 推理和正文共享输出上限，任务硬超时覆盖完整生成过程。
 # 蓝铃本机可以保留原有任务模型分配。

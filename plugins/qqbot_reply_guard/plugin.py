@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,6 +9,7 @@ from typing import Any, ClassVar, cast
 
 import asyncio
 import json
+import time
 import uuid
 
 from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugin, PluginConfigBase
@@ -75,24 +77,52 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
 
     config_model: ClassVar[type[PluginConfigBase] | None] = GuardConfig
 
-    async def on_load(self) -> None:
-        """初始化单个私聊快照；加载期间不调用模型。"""
-        self._active = True
+    def __init__(self) -> None:
+        """创建有界瞬时状态，加载失败时也可以安全卸载。"""
+        super().__init__()
+        self._active = False
         self._pending: PendingReply | None = None
         self._retried_message_id = ""
         self._settled_message_id = ""
+        self._received: OrderedDict[str, tuple[str, float]] = OrderedDict()
+
+    async def on_load(self) -> None:
+        """启用私聊检查；加载期间不调用模型。"""
+        self._active = True
         self.ctx.logger.info("私聊回复执行检查已加载，启用=%s", cast(GuardConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
         """丢弃未完成快照；插件没有后台任务或持久化状态。"""
         self._active = False
         self._pending = None
+        self._received.clear()
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
         """配置变化后废弃旧目标，保留本进程已核对消息的去重标识。"""
         del config_data, version
         if scope == CONFIG_RELOAD_SCOPE_SELF:
             self._pending = None
+            self._received.clear()
+
+    @HookHandler(
+        "chat.receive.before_process", name="qqbot_reply_guard_receive",
+        description="记录消息接收时间，让连发收集窗口包含已经经过的处理时间",
+        mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def receive(self, message: object = None, **kwargs: Any) -> dict[str, object]:
+        """只记录源消息标识和单调时钟；相同消息重复投递不延长窗口。"""
+        del kwargs
+        if self._active and cast(GuardConfig, self.config).plugin.enabled and isinstance(message, Mapping):
+            session_id, message_id = message.get("session_id"), message.get("message_id")
+            if (message.get("platform") == "qq" and isinstance(session_id, str) and session_id
+                    and isinstance(message_id, str) and message_id):
+                previous = self._received.get(session_id)
+                if previous is None or previous[0] != message_id:
+                    self._received[session_id] = (message_id, time.monotonic())
+                    self._received.move_to_end(session_id)
+                    if len(self._received) > 128:
+                        self._received.popitem(last=False)
+        return {"action": "continue"}
 
     async def _pending_message_id(self, session_id: str) -> str:
         """只接受身份配置对应的 QQ 私聊，且最近消息必须仍由主人发送。"""
@@ -220,10 +250,14 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         if reply_tool is None:
             return {"action": "continue"}
         if self._settled_message_id != message_id:
-            # 本轮已绑定原生 Planner 中断标记。留出连发窗口；新消息到来后
-            # 由原生中断流程重新收集上下文，不把未进入本轮的消息拼入旧请求。
+            # 从消息接收时算连发窗口；上下文准备已花掉的时间不再重复等待。
+            # 新消息仍由原生中断流程重新收集，不把补充拼入旧请求。
             self._settled_message_id = message_id
-            await asyncio.sleep(PRIVATE_MESSAGE_SETTLE_SECONDS)
+            received = self._received.get(session_id)
+            elapsed = max(0.0, time.monotonic() - received[1]) if received and received[0] == message_id else 0.0
+            wait = max(0.0, PRIVATE_MESSAGE_SETTLE_SECONDS - elapsed)
+            if wait:
+                await asyncio.sleep(wait)
             async with asyncio.timeout(3):
                 if await self._pending_message_id(session_id) != message_id:
                     return {"action": "continue"}

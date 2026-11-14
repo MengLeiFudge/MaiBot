@@ -30,6 +30,6 @@ class ReplyRegistrationTests(IsolatedAsyncioTestCase):
 
     async def test_partially_loaded_plugins_can_be_unloaded(self):
         """注册失败时还没执行 on_load，也必须允许框架卸载实例。"""
-        for plugin in (QQBotReplyTimingPlugin(),):
+        for plugin in (QQBotReplyTimingPlugin(), QQBotReplyGuardPlugin()):
             await plugin.on_unload()
             await plugin.on_config_update("self", {}, "0.1.0")

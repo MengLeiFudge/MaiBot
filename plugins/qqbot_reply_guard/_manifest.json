@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-reply-guard",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "name": "QQBot 私聊回复执行检查",
   "description": "为主人私聊展开同会话引用，说明记忆与搜索依据，通过原生 reply 处理回复及研究续轮。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},

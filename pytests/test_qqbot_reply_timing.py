@@ -134,3 +134,23 @@ class ReplyTimingTests(IsolatedAsyncioTestCase):
         self.assertEqual(len(self.plugin._turns), 0)
         self.assertEqual(len(self.plugin._received), 0)
         self.assertTrue(self.plugin._enabled())
+
+    async def test_native_first_and_research_supplement_use_one_credit(self):
+        """原生首段 typing=False 也进入计时，补充答复不能再抵扣。"""
+        self.clock += 1
+        message = self.outbound()
+        built = await self.plugin.prepare_segment(message=message, processed_plain_text="中" * 30, typing=False)
+        self.assertTrue(built["modified_kwargs"]["typing"])
+        await self.plugin.before_send(message=message, typing=True)
+        self.assertAlmostEqual(self.waits[0], 2.6)
+        await self.plugin.after_send(message=message, sent=True)
+        supplement = await self.plugin.prepare_segment(
+            message=self.outbound("supplement"), processed_plain_text="中" * 30, typing=False)
+        self.assertTrue(supplement["modified_kwargs"]["typing"])
+        result = await self.plugin.before_send(message=self.outbound("supplement"), typing=True)
+        self.assertNotIn("modified_kwargs", result)
+
+    async def test_unprocessed_plugin_message_keeps_requested_typing(self):
+        """没有后处理正文的插件通知不被改成模拟打字。"""
+        result = await self.plugin.prepare_segment(message=self.outbound(), processed_plain_text="", typing=False)
+        self.assertNotIn("modified_kwargs", result)

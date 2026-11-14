@@ -129,6 +129,57 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         return {"action": "continue"}
 
     @HookHandler(
+        "send_service.after_build_message", name="qqbot_reply_timing_native",
+        description="让已完成后处理的回复首段进入统一发送计时",
+        mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=1000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def prepare_segment(
+        self, message: object = None, processed_plain_text: str = "", typing: bool = False, **kwargs: Any,
+    ) -> dict[str, object]:
+        """原生回复首段默认关闭 typing；分段已完成时统一由首条抵扣决定补等。"""
+        if (self._enabled() and not typing and processed_plain_text and isinstance(message, Mapping)
+                and message.get("platform") == "qq" and message.get("session_id") in self._turns):
+            return {"action": "continue", "modified_kwargs": {
+                **kwargs, "message": message, "processed_plain_text": processed_plain_text, "typing": True,
+            }}
+        return {"action": "continue"}
+
+    @HookHandler(
+        "send_service.before_send", name="qqbot_reply_route",
+        description="为本实例缺少连接标识的 QQ 出站消息补齐 NapCat 路由",
+        mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=5000, error_policy=ErrorPolicy.ABORT,
+    )
+    async def prepare_route(self, message: object = None, **kwargs: Any) -> dict[str, object]:
+        """只补本账号缺失的 scope，已有路由、目标与消息内容保持原样。"""
+        if not self._enabled() or not isinstance(message, Mapping) or message.get("platform") != "qq":
+            return {"action": "continue"}
+        info = message.get("message_info")
+        if not isinstance(info, Mapping):
+            return {"action": "continue"}
+        sender = info.get("user_info")
+        extra = info.get("additional_config") or {}
+        if not isinstance(sender, Mapping) or not isinstance(extra, Mapping):
+            return {"action": "continue"}
+        if any(extra.get(key) for key in ("platform_io_scope", "route_scope", "adapter_scope", "connection_id")):
+            return {"action": "continue"}
+        account = str(await self.ctx.config.get("bot.qq_account", ""))
+        if not account or str(sender.get("user_id", "")) != account:
+            return {"action": "continue"}
+        accounts = [extra.get(key) for key in ("platform_io_account_id", "account_id", "self_id", "bot_account") if extra.get(key)]
+        if any(str(value) != account for value in accounts):
+            return {"action": "continue"}
+        adapter = await self.ctx.config.get_plugin("maibot-team.napcat-adapter")
+        server = adapter.get("napcat_server")
+        scope = server.get("connection_id") if isinstance(server, Mapping) else None
+        if not isinstance(scope, str) or not scope.strip():
+            return {"action": "continue"}
+        routed = {**message, "message_info": {**info, "additional_config": {
+            **extra, "platform_io_account_id": account, "platform_io_scope": scope.strip(),
+        }}}
+        self.ctx.logger.info("已为本账号出站消息补齐 NapCat 连接标识")
+        return {"action": "continue", "modified_kwargs": {**kwargs, "message": routed}}
+
+    @HookHandler(
         "send_service.before_send", name="qqbot_reply_timing_send",
         description="首条打字等待扣除本轮已经经过的处理时间",
         mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=180000, error_policy=ErrorPolicy.ABORT,
