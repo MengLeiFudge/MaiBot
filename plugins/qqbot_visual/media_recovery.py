@@ -88,8 +88,6 @@ async def recover_media(ctx: Any, source: Mapping[str, Any]) -> list[dict[str, s
         except Exception as exc:
             ctx.logger.warning("原媒体恢复失败: msg_id=%s error_type=%s", message_id, type(exc).__name__)
             segments.append({"type": kind})
-        if len(segments) >= 8:
-            break
     if not segments:
         raise ValueError("NapCat 原消息不含图片段")
     return segments

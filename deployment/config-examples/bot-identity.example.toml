@@ -14,8 +14,8 @@ behavior_style = """
 """
 
 [visual]
-planner_mode = "text"
-replyer_mode = "text"
+planner_mode = "multimodal"
+replyer_mode = "multimodal"
 wait_image_recognize_max_time = 15.0 # 文本规划最多等后台图片描述 15 秒；不改变识图任务自身超时。
 
 [emoji]

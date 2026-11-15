@@ -10,7 +10,7 @@ import re
 
 async def read_screen_subtitles(
     video: Path, folder: Path, ffmpeg: str, duration: float,
-    command: Callable[..., Awaitable[bytes]],
+    command: Callable[..., Awaitable[bytes]], *, start_seconds: float = 0, end_seconds: float | None = None,
 ) -> tuple[Path | None, str]:
     """Extract screen text without relying on small storyboard cells.
 
@@ -18,8 +18,10 @@ async def read_screen_subtitles(
         video: Validated video file belonging to the current message.
         folder: Owned temporary workspace, removed by the reader.
         ffmpeg: Existing local FFmpeg executable.
-        duration: Video duration in seconds, bounded by the reader.
+        duration: Total video duration in seconds.
         command: Existing bounded subprocess runner with tree cancellation.
+        start_seconds: Beginning of the requested window in original video time.
+        end_seconds: End of that window, or the total duration.
 
     Returns:
         An SRT file when text exists, plus timestamped text and coverage facts.
@@ -30,11 +32,12 @@ async def read_screen_subtitles(
     """
     if os.name != "nt":
         raise RuntimeError("画面字幕OCR需要Windows中文识别组件")
+    end = min(duration, end_seconds if end_seconds is not None else duration)
     frames = folder / "subtitle-frames"
     frames.mkdir()
     await command([
         ffmpeg, "-hide_banner", "-v", "error", "-nostdin", "-protocol_whitelist", "file,pipe",
-        "-i", str(video), "-an", "-sn", "-vf",
+        "-ss", str(start_seconds), "-i", str(video), "-t", str(end - start_seconds), "-an", "-sn", "-vf",
         "fps=2:start_time=0,scale=1280:720:force_original_aspect_ratio=decrease",
         "-frames:v", "1200", "-q:v", "3", str(frames / "frame-%05d.jpg"),
     ], timeout=30, folder=folder)
@@ -52,7 +55,7 @@ async def read_screen_subtitles(
     segments: list[dict] = []
     active: dict[str, dict] = {}
     for sample in samples:
-        at = float(sample["at"])
+        at = start_seconds + float(sample["at"])
         current: dict[str, dict] = {}
         for line in sample["lines"]:
             text = " ".join(str(line).split())
@@ -63,18 +66,18 @@ async def read_screen_subtitles(
             previous = active.get(key)
             if previous is not None and at - previous["to"] <= 0.51:
                 segment = previous
-                segment["to"] = min(duration, at + 0.5)
+                segment["to"] = min(end, at + 0.5)
             else:
-                segment = {"from": at, "to": min(duration, at + 0.5), "text": text}
+                segment = {"from": at, "to": min(end, at + 0.5), "text": text}
                 segments.append(segment)
             current[key] = segment
         active = current
     segments.sort(key=lambda segment: segment["from"])
-    coverage = min(duration, float(samples[-1]["at"]) + 0.5)
+    coverage = min(end, start_seconds + float(samples[-1]["at"]) + 0.5)
     complete = result["status"] == "complete" and result["processed"] == result["expected"]
     report = (
         f"画面文字OCR：{'采样完成' if complete else '采样未完成'}；间隔0.5秒；"
-        f"覆盖0–{coverage:.2f}/{duration:.2f}秒，共{len(samples)}/{result['expected']}帧。"
+        f"覆盖{start_seconds:.2f}–{coverage:.2f}秒；请求范围{start_seconds:.2f}–{end:.2f}秒，视频总长{duration:.2f}秒，共{len(samples)}/{result['expected']}帧。"
         "以下文字来自原视频画面，可能包含歌词、片名和水印；请结合画面区分。"
         "OCR可能错字，短于采样间隔的文字可能遗漏，不能把未读到说成原视频模糊，也不能声称已完整听取音频。\n"
     )

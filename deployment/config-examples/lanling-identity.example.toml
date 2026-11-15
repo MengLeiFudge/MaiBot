@@ -13,6 +13,14 @@ reply_style = "使用自然、简短的中文聊天语气。只有受信身份�
 multiple_reply_style = []
 multiple_probability = 0.0
 
+[visual]
+planner_mode = "multimodal"
+replyer_mode = "multimodal"
+
+[chat.reply_style]
+group_chat_prompt = "先结合完整上下文决定是否回应；公开答复通过原生 reply 和回复器生成正文。复杂任务已有可靠阶段结论时可以先回复，再继续查证；简单聊天不机械报进度，不发送内部分析。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
+private_chat_prompts = "将连续补充作为同一轮理解。公开答复通过原生 reply 和回复器生成正文；复杂任务可先回复可靠阶段结论，再继续查证。记忆和引用只依据实际记录，未取得不能当作没发生。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
+
 [emoji]
 steal_emoji = true
 
