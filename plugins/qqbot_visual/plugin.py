@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from copy import deepcopy
+
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import asyncio
 
-from maibot_sdk import ON_BOT_CONFIG_RELOAD, Field, HookHandler, MaiBotPlugin, PluginConfigBase
+
+from maibot_sdk import ON_BOT_CONFIG_RELOAD, Field, HookHandler, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 
+from .history import read_history
 from .video_context import VideoContext
 from .video_reader import VideoReader
 
 class PluginSection(PluginConfigBase):
-    """入站图片门控的启用与配置版本。"""
+    """视频和同会话历史工具的启用状态。"""
 
-    enabled: bool = Field(default=True, description="是否启用图片门控、表情收集放行与视频分镜")
+    enabled: bool = Field(default=True, description="是否启用视频分镜和历史阅读工具")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -28,65 +30,32 @@ class VisualConfig(PluginConfigBase):
     video_enabled: bool = Field(default=True, description="下载当前视频链接并用分镜图理解内容")
 
 
-def _mask_media(segments: list[Any], *, collect_emoji: bool = False) -> bool:
-    """递归屏蔽非定向图片；收集开启时保留表情及其二进制。"""
-    changed = False
-    for value in segments:
-        if not isinstance(value, dict):
-            continue
-        part = cast(dict[str, Any], value)
-        kind = part.get("type")
-        if kind == "emoji" and collect_emoji:
-            continue
-        if kind in {"image", "emoji"}:
-            content = str(part.get("data") or "").strip()
-            if not content or content in {"[图片，识别中.....]", "[image]"}:
-                part["data"] = "[图片]" if kind == "image" else "[表情包]"
-                changed = True
-            if "binary_data_base64" in part:
-                del part["binary_data_base64"]
-                changed = True
-        elif kind == "forward" and isinstance(part.get("data"), list):
-            for node in part["data"]:
-                if isinstance(node, dict) and isinstance(node.get("content"), list):
-                    changed = _mask_media(node["content"], collect_emoji=collect_emoji) or changed
-    return changed
+
 
 
 class QQBotVisualPlugin(MaiBotPlugin):
-    """在公开接收 Hook 中门控入站图片，不接管框架内部后台识图。"""
+    """完整保留入站媒体，补充视频与同会话历史阅读。"""
 
     config_model: ClassVar[type[PluginConfigBase] | None] = VisualConfig
     config_reload_subscriptions: ClassVar[tuple[str, ...]] = (ON_BOT_CONFIG_RELOAD,)
 
     def __init__(self) -> None:
-        """保存身份与收集开关，视频读取器在加载时创建。"""
+        """保存当前 QQ 身份，视频读取器在加载时创建。"""
         super().__init__()
         self._bot_id = ""
-        self._names: tuple[str, ...] = ()
-        self._collect_emoji = False
+
         self._video_reader: VideoReader | None = None
         self._video_context: VideoContext | None = None
 
     async def _reload_bot_config(self) -> None:
-        """通过公开 config.get 读取身份和收集开关，校验后一起替换。"""
+        """读取当前 QQ 身份，不接管原生图片处理。"""
         async with asyncio.timeout(3):
-            platform, bot_id, nickname, aliases, collect_emoji = await asyncio.gather(
-                self.ctx.config.get("bot.platform"),
-                self.ctx.config.get("bot.qq_account"),
-                self.ctx.config.get("bot.nickname"),
-                self.ctx.config.get("bot.alias_names"),
-                self.ctx.config.get("emoji.steal_emoji"),
+            platform, bot_id = await asyncio.gather(
+                self.ctx.config.get("bot.platform"), self.ctx.config.get("bot.qq_account"),
             )
         if platform != "qq" or not isinstance(bot_id, str) or not bot_id.isascii() or not bot_id.isdecimal():
-            raise ValueError("定向看图插件需要 bot.platform=qq 和真实 bot.qq_account")
-        if not isinstance(nickname, str) or not isinstance(aliases, list) or not all(isinstance(name, str) for name in aliases):
-            raise ValueError("bot.nickname 和 bot.alias_names 配置类型不合法")
-        if not isinstance(collect_emoji, bool):
-            raise ValueError("emoji.steal_emoji 必须为布尔值")
+            raise ValueError("视频插件需要 bot.platform=qq 和真实 bot.qq_account")
         self._bot_id = bot_id
-        self._names = tuple(dict.fromkeys(name.strip() for name in [nickname, *aliases] if name.strip()))
-        self._collect_emoji = collect_emoji
 
     async def on_load(self) -> None:
         """读取身份配置并创建视频读取器，加载阶段不处理媒体。"""
@@ -94,7 +63,7 @@ class QQBotVisualPlugin(MaiBotPlugin):
         self._video_reader = VideoReader(Path(self.ctx.paths.data_dir) / "videos")
         self._video_context = VideoContext(self.ctx, self._video_reader)
         self.ctx.logger.info("视频分镜已加载：enabled=%s tools_ready=%s", cast(VisualConfig, self.config).video_enabled, self._video_reader.tools_ready)
-        self.ctx.logger.info("QQBot 定向看图已加载，表情收集=%s；引用图片仅复用已有描述", self._collect_emoji)
+
 
     async def on_unload(self) -> None:
         """等待视频任务取消并清空配置副本。"""
@@ -105,15 +74,14 @@ class QQBotVisualPlugin(MaiBotPlugin):
             self._video_context.clear()
             self._video_context = None
         self._bot_id = ""
-        self._names = ()
-        self._collect_emoji = False
+
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
-        """跟随 bot 配置更新本人身份和表情收集开关。"""
+        """跟随 bot 配置更新当前 QQ 身份。"""
         del config_data
         if scope == ON_BOT_CONFIG_RELOAD:
             await self._reload_bot_config()
-            self.ctx.logger.info("QQBot 定向看图配置已更新: version=%s", version)
+            self.ctx.logger.info("视频插件配置已更新: version=%s", version)
 
     @HookHandler(
         "chat.receive.before_process", name="qqbot_visual_video",
@@ -121,7 +89,7 @@ class QQBotVisualPlugin(MaiBotPlugin):
         mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=5000, error_policy=ErrorPolicy.SKIP,
     )
     async def read_video(self, message: object = None, **kwargs: Any) -> dict[str, object]:
-        """只处理本次消息的视频，保持聊天触发和既有图像门控。"""
+        """登记视频来源，原消息与原生触发逻辑保持完整。"""
         media = self._video_context
         if not cast(VisualConfig, self.config).plugin.enabled or not cast(VisualConfig, self.config).video_enabled or media is None:
             return {"action": "continue"}
@@ -167,111 +135,18 @@ class QQBotVisualPlugin(MaiBotPlugin):
         """回复模型独立取得分镜，不依赖规划器转述。"""
         return await self._attach_video(session_id, items, item_schema_version, kwargs, visual=kwargs.get("selected_model_visual") is True)
 
-    def _is_directed(self, message: Mapping[str, Any]) -> bool:
-        """只读取当前顶层正文及结构化 @/回复，不用转发内容触发识图。"""
-        info = message.get("message_info")
-        if not isinstance(info, Mapping):
-            raise ValueError("接收消息缺少 message_info")
-        sender = info.get("user_info")
-        if not isinstance(sender, Mapping) or not sender.get("user_id"):
-            raise ValueError("接收消息缺少真实发送者")
-        if sender["user_id"] == self._bot_id:
-            return False
-        if info.get("group_info") is None:
-            return True
-        additional = info.get("additional_config")
-        if message.get("is_at") is True or isinstance(additional, Mapping) and additional.get("at_bot") is True:
-            return True
-        for part in message["raw_message"]:
-            if not isinstance(part, Mapping):
-                continue
-            data = part.get("data")
-            if part.get("type") == "text" and isinstance(data, str) and any(name in data for name in self._names):
-                return True
-            if isinstance(data, Mapping):
-                if part.get("type") == "at" and data.get("target_user_id") == self._bot_id:
-                    return True
-                if part.get("type") == "reply" and data.get("target_message_sender_id") == self._bot_id:
-                    return True
-        return False
 
-    async def _reuse_quoted_descriptions(self, message: dict[str, Any]) -> bool:
-        """把同会话引用图片的已有描述补入回复组件，不发起新的识图。"""
-        session_id = message.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
-            return False
-        changed = False
-        for part in message["raw_message"]:
-            if not isinstance(part, dict) or part.get("type") != "reply" or not isinstance(part.get("data"), dict):
-                continue
-            data = part["data"]
-            target_id = data.get("target_message_id")
-            if not isinstance(target_id, str) or not target_id:
-                continue
-            quoted = await self.ctx.message.get_by_id(target_id, chat_id=session_id, include_binary_data=False)
-            if (
-                not isinstance(quoted, Mapping)
-                or quoted.get("session_id") != session_id
-                or quoted.get("message_id") != target_id
-                or quoted.get("platform") != message.get("platform")
-            ):
-                continue
-            segments = quoted.get("raw_message")
-            if not isinstance(segments, list):
-                continue
-            descriptions = [
-                str(segment["data"]).strip()
-                for segment in segments
-                if isinstance(segment, Mapping)
-                and segment.get("type") in {"image", "emoji"}
-                and isinstance(segment.get("data"), str)
-                and str(segment["data"]).strip()
-                not in {"", "[图片]", "[image]", "[图片，识别中.....]", "[表情包]"}
-            ]
-            content = str(data.get("target_message_content") or quoted.get("processed_plain_text") or "")
-            updated = False
-            for description in descriptions:
-                if description not in content:
-                    content = f"{content}\n[引用图片已有描述] {description}".strip()
-                    updated = True
-            if updated:
-                data["target_message_content"] = content
-                changed = True
-        return changed
 
-    @HookHandler(
-        "chat.receive.before_process",
-        name="qqbot_visual_receive_gate",
-        description="非定向图片使用占位；收集开启时放行表情，定向附件沿用原生处理",
-        mode=HookMode.BLOCKING,
-        order=HookOrder.EARLY,
-        timeout_ms=5000,
-        error_policy=ErrorPolicy.SKIP,
-    )
-    async def gate_visuals(self, message: object = None, **kwargs: Any) -> dict[str, object]:
-        """只改返回的消息副本，保留原发送者、路由、时间和其他组件。"""
-        if not cast(VisualConfig, self.config).plugin.enabled:
-            return {"action": "continue"}
-        if not isinstance(message, dict) or message.get("platform") != "qq" or message.get("is_notify") is True:
-            return {"action": "continue"}
-        current = cast(dict[str, Any], message)
-        if not isinstance(current.get("raw_message"), list):
-            raise ValueError("接收消息的 raw_message 必须为列表")
-        modified = deepcopy(current)
-        if self._is_directed(current):
-            try:
-                async with asyncio.timeout(3):
-                    changed = await self._reuse_quoted_descriptions(modified)
-            except Exception as exc:
-                self.ctx.logger.warning("引用图片描述查询失败，保持原引用: error_type=%s", type(exc).__name__)
-                return {"action": "continue"}
-        else:
-            changed = _mask_media(modified["raw_message"], collect_emoji=self._collect_emoji)
-        if not changed:
-            return {"action": "continue"}
-        return {"action": "continue", "modified_kwargs": {**kwargs, "message": modified}}
+    @Tool("read_chat_history", description="读取当前会话更早的完整原消息与图片。默认30条，使用返回的消息ID继续向前翻页；只能读取当前会话。",
+          parameters={"count": {"type": "integer", "minimum": 1, "maximum": 100, "description": "本次读取条数，默认30"},
+                      "before_message_id": {"type": "string", "description": "读取此消息之前的上文；留空读取近期，后续使用返回的next_before_message_id"}},
+          timeout_ms=35000)
+    async def read_chat_history(self, count: object = 30, before_message_id: object = "", **kwargs: Any) -> dict:
+        """会话身份由运行时提供，不接受模型指定另一群或另一私聊。"""
+        session_id = str(kwargs.get("stream_id") or kwargs.get("chat_id") or "")
+        return await read_history(self.ctx, session_id, count, before_message_id)
 
 
 def create_plugin() -> MaiBotPlugin:
-    """返回由 Runner 管理生命周期的定向看图插件。"""
+    """返回由 Runner 管理生命周期的视频与历史插件。"""
     return QQBotVisualPlugin()

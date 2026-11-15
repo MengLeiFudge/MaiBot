@@ -1,6 +1,6 @@
 # 视频分镜
 
-在聊天中发送可公开访问的视频链接，或 QQ 视频附件及含视频的合并转发。插件使用 [DSH Video Storyboard](https://github.com/SAOS-3624/dsh-video-storyboard) 扫描画面变化，检测镜头边界，再按切换密度排版代表帧。Planner 和 Replyer 的公开请求 Hook 直接把分镜原图、逐格时间清单及可用字幕附到原消息的 Context Item。群聊、私聊共用视频能力，聊天触发、图片门控和表情收集沿用原配置。
+在聊天中发送可公开访问的视频链接，或 QQ 视频附件及含视频的合并转发。插件使用 [DSH Video Storyboard](https://github.com/SAOS-3624/dsh-video-storyboard) 扫描画面变化，检测镜头边界，再按切换密度排版代表帧。Planner 和 Replyer 的公开请求 Hook 直接把分镜原图、逐格时间清单及可用字幕附到原消息的 Context Item。群聊、私聊共用视频能力，聊天触发与表情收集沿用原生配置，普通图片不经过插件门控。
 
 支持 B站长链、b23 短链、YouTube、X/Twitter、抖音、小红书、微博、腾讯视频、西瓜等域名，以及 HTTP/HTTPS 视频文件直链。网页解析由 yt-dlp 提供；登录限制或站点风控可能阻止下载。QQ 视频地址由本地 `napcat_adapter` 的 `_build_video_text_segment` 保留；缺少地址时提示改发链接或重传。
 

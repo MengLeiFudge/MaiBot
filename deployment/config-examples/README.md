@@ -12,7 +12,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 启动前还要确认：
 
 - 夜凛 `plugins/napcat_adapter/config.toml` 使用 `127.0.0.1:6201` 和 `connection_id = "yelin"`；蓝铃使用 `127.0.0.1:6204` 和 `connection_id = "lanling"`。按 `napcat-adapter.example.toml` 配置全局禁止发送者名单，包含另外四个机器人账号。该名单先于私聊/群聊名单开关执行，不依赖业务插件。
-- `plugins/qqbot_poke/config.toml`、`plugins/qqbot_knowledge/config.toml`、`plugins/qqbot_identity/config.toml`、`plugins/qqbot_visual/config.toml`、`plugins/qqbot_web_search/config.toml`、`plugins/qqbot_reply_guard/config.toml` 和 `plugins/qqbot_reply_timing/config.toml` 的顶层 `plugin.enabled` 为 `true`。知识插件通过 `127.0.0.1:8081` 使用云栖的共享 DSP 向量检索服务；身份插件在本机 `[identity].owner_qq` 填写真正主人 QQ，示例保持留空。
+- `plugins/qqbot_poke/config.toml`、`plugins/qqbot_knowledge/config.toml`、`plugins/qqbot_identity/config.toml`、`plugins/qqbot_visual/config.toml`、`plugins/qqbot_web_search/config.toml` 和 `plugins/qqbot_reply_timing/config.toml` 的顶层 `plugin.enabled` 为 `true`。知识插件通过 `127.0.0.1:8081` 使用云栖的共享 DSP 向量检索服务；身份插件在本机 `[identity].owner_qq` 填写真正主人 QQ，示例保持留空。
 - 其余 `plugins/qqbot_*/config.toml` 的顶层 `plugin.enabled` 为 `false`。
 - `src/plugins/built_in/plugin_management/config.toml` 为禁用状态。
 
@@ -22,7 +22,7 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 框架执行回复等工具后仍会调用一次 Planner 判断下一步；公开请求 Hook 不支持跳过这次调用。收尾提示用于减少后续多余工具调用，实际节省量需从 `data/MaiBot.db` 的 `llm_usage` 和 `maisaka_monitor_events` 对比，不能将提示词视为硬性轮次上限。
 
-`qqbot_visual` 在接收 Hook 中门控非定向普通图片；私聊、群聊当前正文中的昵称/别名、本人 @ 或回复本人时，当前图片沿用原生识图。引用图只补充同会话已有描述，不重新识别。设置 `[visual].planner_mode = "text"`、`replyer_mode = "text"`、`wait_image_recognize_max_time = 15.0`，让文本规划最多等待图片后台描述 15 秒；设置 `emoji.steal_emoji = true`，保留表情组件的原始数据以进入原生本地表情收集链。门控和表情收集的具体边界见 [qqbot_visual](../../plugins/qqbot_visual/README.md)。框架内部对已发图、工具结果图启动的识图任务没有接收 Hook，插件不能拦截。
+`qqbot_visual` 完整保留入站群聊与私聊附件；设置 `[visual].planner_mode = "multimodal"`、`replyer_mode = "multimodal"`，由支持视觉的主模型读取原图。表情收集沿用 `emoji.steal_emoji`。插件提供可向前翻页的 `read_chat_history`，详见 [消息与媒体阅读](../../plugins/qqbot_visual/README.md)。近期上下文保留现有群聊 40、私聊 60 条；30 条只是主动查阅的默认页长。统一边界见根工作区 [消息完整性与按需触发](../../../docs/message-context.md)。
 
 `qqbot_identity` 向 Planner 和 Replyer 注入真实发送者的 `platform/user_id/is_owner`。Planner 以消息头中的 ID 关联同会话消息 API 返回的最新人类消息；Replyer 按实际目标消息 ID 查询。昵称、自称、人物画像和正文里的 QQ 都不能替代真实身份。知识证据也同时提供给两条路径，详见对应插件 README。
 
@@ -30,4 +30,4 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "high"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 90 秒；拍一拍使用 `utils` 任务并提供相同输出余量。官网搜索使用独立的 32768 输出上限。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
 
-[qqbot_reply_guard](../../plugins/qqbot_reply_guard/README.md) 提供原生回复与研究续轮规则；普通及阶段答复统一使用原生 `reply`，保留完整人设、回复器、后处理分段和原有发送流程。[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 补齐本账号出站消息缺少的 NapCat 连接标识，并按后处理后的第一段文字计算首条等待，再扣除本轮已耗时，后续分段及研究补充按原速度发送。`[chat.reply_timing].planner_interrupt_max_consecutive_count = 10` 允许新消息打断 Planner 后重新收集上下文；[CPA 会话插件](../../plugins/cpa_session/README.md) 补齐首条公开回复送达前的请求取消和过期正文检查，覆盖图片准备、Planner、Replyer 与首条等待；首条成功后继续本轮分段。
+原生 `[chat.reply_style]` 配置提供阶段答复与按需历史查阅指导，无需额外规则注入插件；普通及阶段答复统一使用原生 `reply`，保留完整人设、回复器、后处理分段和发送流程。[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 补齐本账号出站消息缺少的 NapCat 连接标识，首条等待仅按后处理后的第一段文字计算，再扣除本轮已耗时；后续分段及研究补充按原速度发送。`planner_interrupt_max_consecutive_count = 10` 允许新消息打断 Planner；[CPA 会话插件](../../plugins/cpa_session/README.md) 补齐首条公开回复成功前的请求取消和过期正文检查，覆盖图片准备、Planner、Replyer 与首条等待。首条成功后继续本轮分段。

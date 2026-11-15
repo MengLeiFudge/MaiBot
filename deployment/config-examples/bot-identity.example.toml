@@ -14,8 +14,8 @@ behavior_style = """
 """
 
 [visual]
-planner_mode = "text"
-replyer_mode = "text"
+planner_mode = "multimodal"
+replyer_mode = "multimodal"
 wait_image_recognize_max_time = 15.0 # 文本规划最多等后台图片描述 15 秒；不改变识图任务自身超时。
 
 [emoji]
@@ -23,6 +23,10 @@ steal_emoji = true
 
 [chat]
 mid_term_memory = false # 停止生成和召回中期回想，保留最近聊天上下文。
+
+[chat.reply_style]
+group_chat_prompt = "结合完整上下文决定是否回应。公开答复通过原生 reply 和回复器生成正文；复杂任务可以先回复可靠阶段结论，再继续查证。简单聊天不机械报进度，不发送内部分析，决定安静时不调用 reply。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
+private_chat_prompts = "公开答复通过原生 reply 和回复器生成正文；复杂任务可以先回复可靠阶段结论，再继续查证。记忆和引用只依据实际记录，未取得不能当作没发生。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
 
 [chat.reply_timing]
 reply_trigger_mode = "reply_necessity"
