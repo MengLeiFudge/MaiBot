@@ -53,8 +53,11 @@ def _video_rules() -> str:
         "只有工具返回[B站视频读取完成]、实际分镜图片和字幕/画面文字状态后，才可以说已经看过；"
         "工具失败或没有分镜图时，明确说明失败原因，不根据标题、链接或搜索摘要编造画面。"
         "主人给出本机视频路径并要求观看时，通过 tool_search 查找 watch_local_video，传入原始绝对路径；"
-        "大文件直接在本机按时间段读取，不能仅凭大小就说读不了。按返回的 next_start_seconds 继续，"
-        "只讨论实际读到的时间段；可以先回复已经确认的内容，再继续阅读，不能把片段说成整部已看完。"
+        "大文件首次不要只从头逐段顺读：先保持mode=auto、不指定时间范围，取得覆盖全片的时间轴画面与已有字幕。"
+        "结合全片概览和用户问题定位关键片段，再用mode=detail和明确的start_seconds/end_seconds精读、补画面文字；"
+        "若用户已经指定时间点，可直接精读那一段。没有字幕时不能声称听见对白。不要反复获取相同概览，"
+        "不要为了完整看完而机械串行扫完整片；需要全片细节时按问题继续补读，并清楚区分抽样和精读。"
+        "可以先回复已确认且有用的整体结论，再继续查证关键片段；不机械报每段进度，不把抽样说成逐帧看完。"
         "用户只说找视频时先返回候选，不要擅自下载一批视频；用户说看看、学习或总结时，搜索后阅读最相关的一条。[/蓝铃视频能力]"
     )
 
@@ -357,15 +360,16 @@ class QQBotVisualPlugin(MaiBotPlugin):
 
     @Tool(
         "watch_local_video",
-        description="在主人私聊中直接读取本机视频的指定时间段，返回真实分镜图片、字幕状态和继续阅读的位置。支持大文件，无需上传。",
+        description="读取主人指定的本机视频。长视频默认先浏览整个时间轴的真实原图和已有字幕；再选关键时间段用detail精读，避免只从头逐段看。",
         parameters={
             "path": {"type": "string", "required": True, "description": "用户指定的本机 Windows 绝对视频路径"},
-            "start_seconds": {"type": "number", "minimum": 0, "description": "开始秒数，默认0；续读使用 next_start_seconds"},
-            "end_seconds": {"type": "number", "minimum": 0, "description": "结束秒数；默认读取接下来10分钟，每次最多10分钟，可继续读取"},
+            "mode": {"type": "string", "enum": ["auto", "overview", "detail"], "description": "默认auto：长视频无时间范围时先概览全片，明确时间段则精读；overview浏览给定范围或全片，detail细读所选片段"},
+            "start_seconds": {"type": "number", "minimum": 0, "description": "用户指定时间或概览后选定的片段开始秒数；首次看长视频时留空"},
+            "end_seconds": {"type": "number", "minimum": 0, "description": "片段结束秒数；首次概览留空查看整个时间轴，detail每次最多10分钟，可选其他片段继续读"},
         }, timeout_ms=200000,
     )
     async def watch_local_video(
-        self, path: object = "", start_seconds: object = 0, end_seconds: object = None, **kwargs: Any,
+        self, path: object = "", start_seconds: object = 0, end_seconds: object = None, mode: object = "auto", **kwargs: Any,
     ) -> dict[str, object]:
         """复用现有视频读取器，只接受实际主人私聊授权的本机文件。"""
         if not cast(VisualConfig, self.config).video_enabled:
@@ -381,23 +385,29 @@ class QQBotVisualPlugin(MaiBotPlugin):
                 raise ValueError("需要本机盘符开头的绝对视频路径")
             if type(start_seconds) not in {int, float} or end_seconds is not None and type(end_seconds) not in {int, float}:
                 raise ValueError("时间必须是秒数")
+            if not isinstance(mode, str) or mode not in {"auto", "overview", "detail"}:
+                raise ValueError("视频模式须为auto、overview或detail")
             reader = self._video_reader
             if reader is None:
                 raise VideoError("视频读取器尚未就绪")
             source = VideoSource(str(local), local_path=local, start_seconds=float(cast(int | float, start_seconds)),
-                                 end_seconds=float(cast(int | float, end_seconds)) if end_seconds is not None else None)
+                                 end_seconds=float(cast(int | float, end_seconds)) if end_seconds is not None else None, mode=mode)
             overview = await reader.analyze(source)
         except (VideoError, OSError, ValueError, TimeoutError) as exc:
             return {"success": False, "content": f"本机视频未读取：{exc}"}
         end = overview.end_seconds if overview.end_seconds is not None else overview.duration
         next_start = end if end < overview.duration else None
+        self.ctx.logger.info("本机视频读取完成：mode=%s images=%s range=%.2f-%.2f duration=%.2f",
+                             overview.mode, len(overview.images), overview.start_seconds, end, overview.duration)
         return {
             "success": True, "content": overview.prompt,
             "content_items": [{"content_type": "image", "data": base64.b64encode(image).decode("ascii"),
-                               "mime_type": "image/png", "description": f"本机视频实际分镜第{index + 1}张"}
+                               "mime_type": overview.mime_type, "description": f"本机视频实际画面第{index + 1}张，时间见原视频时间清单"}
                               for index, image in enumerate(overview.images)],
             "video": {"duration": overview.duration, "start_seconds": overview.start_seconds, "end_seconds": end,
-                      "next_start_seconds": next_start, "storyboard_images": len(overview.images)},
+                      "next_start_seconds": next_start, "storyboard_images": len(overview.images), "mode": overview.mode,
+                      "samples": overview.evidence.get("samples", []),
+                      "sampling_complete": overview.evidence.get("sampling_complete")},
         }
 
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-visual",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "name": "QQBot 视频与历史阅读",
-  "description": "普通图片使用原生多模态；提供同会话原始历史、QQ和B站视频阅读，以及主人私聊本机视频按段阅读。",
+  "description": "普通图片使用原生多模态；提供原始历史、QQ和B站视频阅读，本机长视频先全片概览再按问题精读。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {
