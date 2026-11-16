@@ -12,7 +12,7 @@ import time
 
 from maibot_sdk import PluginContext
 
-from .video_reader import CACHE_SECONDS, TOTAL_TIMEOUT, VIDEO_CAPABILITY, VideoError, VideoReader, VideoSource, find_video_sources
+from .video_reader import CACHE_SECONDS, TOTAL_TIMEOUT, VIDEO_CAPABILITY, VideoError, VideoNotFoundError, VideoReader, VideoSource, find_video_sources
 from .video_media import resolve_qq_video
 
 MESSAGE_PREFIX = re.compile(r'^<message msg_id="([^"]+)"(?:\s|>)')
@@ -46,7 +46,7 @@ class VideoContext:
     def __init__(self, ctx: PluginContext, reader: VideoReader) -> None:
         self.ctx = ctx
         self.reader = reader
-        self._sources: OrderedDict[tuple[str, str], tuple[float, VideoSource | None]] = OrderedDict()
+        self._sources: OrderedDict[tuple[str, str], tuple[float, list[VideoSource] | None]] = OrderedDict()
         self._failures: OrderedDict[tuple[str, str], tuple[float, str]] = OrderedDict()
 
     def clear(self) -> None:
@@ -65,7 +65,7 @@ class VideoContext:
         if ((sources or "[视频]" in text or "[视频文件]" in text)
                 and isinstance(session_id, str) and session_id and isinstance(message_id, str) and message_id):
             key = (session_id, message_id)
-            self._sources[key] = (time.monotonic(), sources[0] if sources else None)
+            self._sources[key] = (time.monotonic(), sources or None)
             self._sources.move_to_end(key)
             while len(self._sources) > 128:
                 self._sources.popitem(last=False)
@@ -126,16 +126,26 @@ class VideoContext:
                         raise VideoError("原视频消息没有可用下载地址，请重新发送视频链接")
                 if not visual:
                     raise VideoError("当前聊天模型未启用视觉能力，请启用该模型的visual配置后重试")
-                video = source[1]
-                if video is None:
+                videos = source[1]
+                if videos is None:
                     async with asyncio.timeout(min(15, max(0.01, deadline - time.monotonic()))):
                         video = await resolve_qq_video(self.ctx.api.call, loaded)
                     if video is None:
                         raise VideoError("原消息或合并转发中没有可读取的视频段")
-                    self._sources[(session_id, message_id)] = (time.monotonic(), video)
-                phase = "视频下载与分镜、字幕处理"
-                async with asyncio.timeout(max(0.01, deadline - time.monotonic())):
-                    overview = await self.reader.analyze(video)
+                    videos = [video]
+                    self._sources[(session_id, message_id)] = (time.monotonic(), videos)
+                phase = "链接解析与视频下载、分镜、字幕处理"
+                # 只有未识别到视频时才继续下一链接，访问失败不拿其他内容充数。
+                for video in videos:
+                    try:
+                        async with asyncio.timeout(max(0.01, deadline - time.monotonic())):
+                            overview = await self.reader.analyze(video)
+                    except VideoNotFoundError:
+                        continue
+                    self._sources[(session_id, message_id)] = (time.monotonic(), [video])
+                    break
+                else:
+                    raise VideoNotFoundError("已尝试解析本消息中的链接，但未识别到可下载的视频；这不表示网页为空或无法访问")
                 additions = [{"type": "text", "text": overview.prompt}]
                 additions.extend({"type": "image", "image_format": "png", "image_base64": base64.b64encode(image).decode("ascii")} for image in overview.images)
                 self.ctx.logger.info("DSH分镜已附到主模型: msg_id=%s images=%s cells=%s duration=%.2fs", message_id, len(overview.images), overview.evidence["cells_total"], overview.duration)
@@ -148,8 +158,8 @@ class VideoContext:
             except Exception as exc:
                 additions = [{"type": "text", "text": "[视频未读取] 下载或DSH分镜处理失败，请重新发送可访问的短视频；不能声称已经看过。"}]
                 self.ctx.logger.warning("视频分镜失败: msg_id=%s error_type=%s", message_id, type(exc).__name__)
-            if visual and phase == "QQ原视频取得" and additions[0]["text"].startswith("[视频未读取]"):
-                # QQ原文件下载可在协议端继续等待，120秒内不重复发起同一下载。
+            if visual and additions[0]["text"].startswith("[视频未读取]"):
+                # 两个模型及后续续轮复用失败结果，避免反复解析同一非视频网页或下载失败来源。
                 self._failures[(session_id, message_id)] = (time.monotonic(), additions[0]["text"])
                 self._failures.move_to_end((session_id, message_id))
                 while len(self._failures) > 128:

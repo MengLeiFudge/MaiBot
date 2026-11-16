@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -48,10 +47,6 @@ VIDEO_CAPABILITY = (
     "没有读取结果只表示尚未读取，不能据此声称已经打开、页面为空或站点无法访问。"
     "未附入可读画面时如实区分未读取与实际读取失败，不编造画面或声音。"
 )
-VIDEO_DOMAINS = (
-    "b23.tv", "bilibili.com", "bili2233.cn", "youtube.com", "youtu.be", "x.com", "twitter.com",
-    "douyin.com", "xhslink.com", "xiaohongshu.com", "weibo.com", "v.qq.com", "ixigua.com", "bad.news",
-)
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi", ".flv"}
 URL_PATTERN = re.compile(r"https?://[^\s\"'<>，。；）]+", re.IGNORECASE)
 
@@ -64,20 +59,8 @@ class VideoConnectionError(VideoError):
     """可在下载预算内重试的临时连接中断。"""
 
 
-class PageVideoParser(HTMLParser):
-    """只读取页面声明的主视频元数据，不从推荐列表挑选媒体。"""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.videos: dict[str, str] = {}
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag != "meta":
-            return
-        values = dict(attrs)
-        key, content = values.get("property"), values.get("content")
-        if key in {"og:video", "og:video:url", "og:video:secure_url"} and content:
-            self.videos[key] = content
+class VideoNotFoundError(VideoError):
+    """网页已尝试解析，但未识别到可下载的视频。"""
 
 
 @dataclass(frozen=True)
@@ -140,24 +123,24 @@ class VideoOverview:
 
 
 def find_video_sources(text: str) -> list[VideoSource]:
-    """Find a supported page or explicit video URL in the current message."""
+    """收集消息中的公网HTTP链接，由下载器识别网页或媒体。"""
     normalized = html.unescape(text.replace("\\/", "/"))
     attachment = "[视频]" in normalized or "[视频文件]" in normalized
+    sources: list[VideoSource] = []
+    seen: set[str] = set()
     for match in URL_PATTERN.finditer(normalized):
         url = match.group().rstrip(".,;:!?)]}）】》”’")
-        try:
-            parsed = urlsplit(url)
-            host = (parsed.hostname or "").lower()
-        except ValueError:
+        if url in seen:
             continue
-        page = any(host == domain or host.endswith("." + domain) for domain in VIDEO_DOMAINS)
-        if host == "bad.news" or host.endswith(".bad.news"):
-            page = re.fullmatch(r"/t/[0-9]+/?", parsed.path) is not None
+        try:
+            _validate_url(url)
+        except VideoError:
+            continue
+        seen.add(url)
         labeled = re.search(r"链接\s*[:：]\s*$", normalized[max(0, match.start() - 12):match.start()]) is not None
-        direct = Path(parsed.path).suffix.lower() in VIDEO_SUFFIXES or attachment and labeled and not page
-        if direct or page:
-            return [VideoSource(url, direct)]
-    return []
+        direct = Path(urlsplit(url).path).suffix.lower() in VIDEO_SUFFIXES or attachment and labeled
+        sources.append(VideoSource(url, direct))
+    return sources
 
 
 def _validate_url(url: str) -> None:
@@ -238,6 +221,14 @@ async def _command(arguments: list[str], *, timeout: float, folder: Path | None 
                 raise VideoError("视频站点TLS连接失败，请检查本机代理与站点连通性后重试")
             if "403" in detail or "login" in detail.lower() or "cookies" in detail.lower():
                 raise VideoError("视频站点拒绝访问或要求登录，请发送可公开访问的视频或原视频附件")
+            if name == "yt-dlp":
+                if "Unsupported URL:" in detail or "No video could be found" in detail:
+                    raise VideoNotFoundError("已尝试解析链接，但未识别到可下载的视频；这不表示页面为空或无法访问")
+                status = re.search(r"HTTP Error (\d{3})", detail)
+                if status is not None:
+                    raise VideoError(f"读取链接或视频失败（HTTP {status[1]}），尚未取得可读视频")
+                if "Requested format is not available" in detail:
+                    raise VideoError("已识别视频，但没有符合下载限制的可用格式，请发送较低清晰度的视频或原附件")
             raise VideoError(f"{name}处理失败（退出码{process.returncode}），请重新发送有效视频")
         return stdout
     except BaseException:
@@ -347,50 +338,6 @@ class VideoReader:
             self._cache[cache_key] = (time.monotonic(), result)
         return result
 
-    async def _read_page_video(self, url: str) -> str:
-        """取得 bad.news 原帖声明的 MP4，页面和重定向均有界读取。"""
-        resolver = PublicResolver()
-        proxies = getproxies()
-        proxy = proxies.get("https") or proxies.get("http")
-        try:
-            connector = aiohttp.TCPConnector(resolver=resolver)
-            async with asyncio.timeout(20), aiohttp.ClientSession(
-                connector=connector, headers={"User-Agent": "Mozilla/5.0"},
-            ) as session:
-                current_url = url
-                for attempt in range(4):
-                    _validate_url(current_url)
-                    parsed = urlsplit(current_url)
-                    if (parsed.hostname not in {"bad.news", "www.bad.news"}
-                            or parsed.path.rstrip("/") != urlsplit(url).path.rstrip("/")):
-                        raise VideoError("视频页面跳转到其他页面，未取得原帖视频")
-                    async with session.get(current_url, proxy=proxy, allow_redirects=False) as response:
-                        if response.status in {301, 302, 303, 307, 308}:
-                            location = response.headers.get("Location")
-                            if not location or attempt == 3:
-                                raise VideoError("视频页面重定向过多或缺少目标地址")
-                            current_url = urljoin(current_url, location)
-                            continue
-                        if response.status >= 400:
-                            raise VideoError(f"视频页面读取失败（HTTP {response.status}）")
-                        body = bytearray()
-                        async for chunk in response.content.iter_chunked(64 * 1024):
-                            body.extend(chunk)
-                            if len(body) > 2 * 1024 * 1024:
-                                raise VideoError("视频页面超过2 MiB，未完成解析")
-                        parser = PageVideoParser()
-                        parser.feed(body.decode(response.charset or "utf-8", errors="replace"))
-                        for key in ("og:video:secure_url", "og:video:url", "og:video"):
-                            video_url = urljoin(current_url, parser.videos.get(key, ""))
-                            _validate_url(video_url)
-                            media = urlsplit(video_url)
-                            if media.hostname == "video.twimg.com" and Path(media.path).suffix.lower() == ".mp4":
-                                return video_url
-                        raise VideoError("视频页面未提供可读取的原帖MP4，未读取推荐列表")
-        finally:
-            await resolver.close()
-        raise VideoError("未取得有效的视频页面响应")
-
     async def _download(self, source: VideoSource, folder: Path) -> tuple[Path, str, Path | None]:
         """取得视频与字幕，在同一预算内重试临时网页下载中断。
 
@@ -413,23 +360,16 @@ class VideoReader:
                 raise VideoError("本机视频文件为空")
             return video, video.name, None
         _validate_url(source.url)
-        page_url = ""
-        if urlsplit(source.url).hostname in {"bad.news", "www.bad.news"}:
-            page_url = source.url
-            source = VideoSource(await self._read_page_video(page_url), direct=True)
         if source.direct:
             video = folder / "video.mp4"
             resolver = PublicResolver()
             try:
                 connector = aiohttp.TCPConnector(resolver=resolver)
-                proxies = getproxies()
-                proxy = (proxies.get("https") or proxies.get("http")) if page_url else None
-                headers = {"Referer": page_url, "User-Agent": "Mozilla/5.0"} if page_url else {}
-                async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as session:
+                async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=60)) as session:
                     current_url = source.url
                     for attempt in range(6):
                         _validate_url(current_url)
-                        async with session.get(current_url, proxy=proxy, allow_redirects=False) as response:
+                        async with session.get(current_url, allow_redirects=False) as response:
                             if response.status in {301, 302, 303, 307, 308}:
                                 location = response.headers.get("Location")
                                 if not location or attempt == 5:
@@ -459,14 +399,15 @@ class VideoReader:
         arguments = [
             sys.executable, "-m", "yt_dlp", "--ignore-config", "--quiet",
             "--no-progress", "--no-simulate", "--encoding", "utf-8", "--no-playlist", "--playlist-items", "1", "--no-cache-dir",
-            "--use-extractors", "default,-generic", "--retries", "1", "--fragment-retries", "1",
+            "--retries", "1", "--fragment-retries", "1",
             "--socket-timeout", "15", "--max-filesize", "80M", "--proxy", proxy,
             "--impersonate", "Chrome",
-            # X公开嵌入接口无需访问当前TLS失败的访客令牌接口。
-            *(["--extractor-args", "twitter:api=syndication"] if any(host == domain or host.endswith("." + domain) for domain in ("x.com", "twitter.com")) else []),
+            "--extractor-args", "generic:impersonate",
+            # 嵌入的X视频也使用公开接口，是否调用由yt-dlp提取器决定。
+            "--extractor-args", "twitter:api=syndication",
             "--match-filter", "!is_live & duration <=? 600",
             "--ffmpeg-location", str(Path(self._ffmpeg or "").parent),
-            "--format", "bv*[height<=720]+ba/b[height<=720]/bv*[width<=720]+ba/b[width<=720]",
+            "--format", "bv*[height<=720]+ba/b[height<=720]/bv*[width<=720]+ba/b[width<=720]/b[height<=?720][width<=?720]",
             "--merge-output-format", "mp4", "--write-subs", "--write-auto-subs",
             "--sub-langs", "zh-Hans,zh-CN,zh,ai-zh,en", "--sub-format", "srt/best", "--convert-subs", "srt",
             "--output", str(folder / "video.%(ext)s"), "--print", "after_move:%(title)j", "--", source.url,
