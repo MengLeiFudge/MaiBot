@@ -33,6 +33,7 @@ class ReplyTurn:
 
     source_id: str
     started_at: float
+    author_id: str = ""
     first_delivery_id: str = ""
     wait_task: asyncio.Task[None] | None = None
 
@@ -55,7 +56,8 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
     def __init__(self) -> None:
         """创建有界瞬时状态，支持加载失败后的安全卸载。"""
         super().__init__()
-        self._received: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        self._received: OrderedDict[str, tuple[str, float, str]] = OrderedDict()
+        self._group_received: OrderedDict[tuple[str, str], tuple[str, float, str]] = OrderedDict()
         self._turns: OrderedDict[str, ReplyTurn] = OrderedDict()
         self._active = False
 
@@ -68,12 +70,14 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         """停止接纳新修正并释放瞬时状态。"""
         self._active = False
         self._received.clear()
+        self._group_received.clear()
         self._turns.clear()
 
     async def on_config_update(self, scope: str, config_data: dict[str, object], version: str) -> None:
         """配置更新后放弃旧轮次，下一条真实消息重新建立时钟。"""
         del scope, config_data, version
         self._received.clear()
+        self._group_received.clear()
         self._turns.clear()
 
     def _enabled(self) -> bool:
@@ -90,12 +94,23 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         if self._enabled() and isinstance(message, Mapping) and message.get("platform") == "qq":
             session_id, message_id = message.get("session_id"), message.get("message_id")
             if isinstance(session_id, str) and session_id and isinstance(message_id, str) and message_id:
-                self._received[session_id] = (message_id, time.monotonic())
+                info = message.get("message_info")
+                user = info.get("user_info") if isinstance(info, Mapping) else None
+                author_id = str(user.get("user_id") or "") if isinstance(info, Mapping) and isinstance(user, Mapping) and info.get("group_info") else ""
+                source = (message_id, time.monotonic(), author_id)
+                self._received[session_id] = source
                 self._received.move_to_end(session_id)
                 if len(self._received) > 128:
                     self._received.popitem(last=False)
+                if author_id:
+                    key = (session_id, author_id)
+                    self._group_received[key] = source
+                    self._group_received.move_to_end(key)
+                    if len(self._group_received) > 4096:
+                        self._group_received.popitem(last=False)
                 turn = self._turns.get(session_id)
-                if turn is not None and turn.source_id != message_id and turn.wait_task is not None:
+                if (turn is not None and turn.source_id != message_id and turn.author_id == author_id
+                        and turn.wait_task is not None):
                     turn.wait_task.cancel()
         return {"action": "continue"}
 
@@ -184,6 +199,12 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         self.ctx.logger.info("已为本账号出站消息补齐 NapCat 连接标识")
         return {"action": "continue", "modified_kwargs": {**kwargs, "message": routed}}
 
+    def _latest_source(self, session_id: str, turn: ReplyTurn) -> tuple[str, float, str] | None:
+        """群聊只让本轮发送者的补充取代首段，其他成员不撤销当前发送。"""
+        if turn.author_id:
+            return self._group_received.get((session_id, turn.author_id))
+        return self._received.get(session_id)
+
     @HookHandler(
         "send_service.before_send", name="qqbot_reply_timing_send",
         description="首条打字等待扣除本轮已经经过的处理时间",
@@ -206,24 +227,33 @@ class QQBotReplyTimingPlugin(MaiBotPlugin):
         delay = normal_delay(text if isinstance(text, str) else "", speed, message.get("is_emoji") is True)
         elapsed = max(0.0, time.monotonic() - turn.started_at)
         wait = max(0.0, delay - elapsed)
-        received = self._received.get(session_id)
+        received = self._latest_source(cast(str, session_id), turn)
         if wait and (received is None or received[0] == turn.source_id):
             turn.wait_task = create_task(asyncio.sleep(wait))
             try:
                 await turn.wait_task
             except CancelledError:
-                received = self._received.get(session_id)
+                received = self._latest_source(cast(str, session_id), turn)
                 if received is None or received[0] == turn.source_id:
                     raise
             finally:
                 turn.wait_task = None
         if not self._enabled():
             return {"action": "abort"}
-        received = self._received.get(session_id)
+        received = self._latest_source(cast(str, session_id), turn)
         if received is not None and received[0] != turn.source_id:
             # 此处尚未调用平台，旧首段可以明确放弃，不影响下一轮首条资格。
             turn.first_delivery_id = ""
-            self.ctx.logger.info("首条等待期间收到新消息，取消旧首段发送")
+            try:
+                async with asyncio.timeout(5):
+                    result = await self.ctx.api.call(
+                        "mlj.cpa-session.resume_cancelled_reply", version="1", session_id=session_id,
+                    )
+                if not isinstance(result, dict) or result.get("queued") is not True:
+                    raise RuntimeError("会话插件未确认重新排队")
+            except Exception as exc:
+                self.ctx.logger.error("首条取消后重新排队失败: session_id=%s error=%s", session_id, exc)
+            self.ctx.logger.info("同发送者补充已取代待发送首段")
             return {"action": "abort"}
         self.ctx.logger.info("首条回复等待: 原等待=%.3fs 已处理=%.3fs 补等=%.3fs", delay, elapsed, wait)
         return {"action": "continue", "modified_kwargs": {**kwargs, "message": message, "typing": False}}

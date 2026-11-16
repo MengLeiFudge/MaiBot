@@ -16,6 +16,7 @@ class ReplyTurn:
     source_id: str | None
     received: list[str]
     first_sent: bool = False
+    resume_queued: bool = False
 
     @property
     def stale(self) -> bool:
@@ -28,6 +29,8 @@ class ReplyInterruption:
 
     def __init__(self) -> None:
         self.received: OrderedDict[str, list[str]] = OrderedDict()
+        self.group_received: OrderedDict[tuple[str, str], list[str]] = OrderedDict()
+        self.senders: dict[tuple[str, str], str] = {}
         self.turns: dict[str, ReplyTurn] = {}
         self.reply_turns: dict[str, ReplyTurn] = {}
         self.pending: dict[asyncio.Task[APIResponse], ReplyTurn] = {}
@@ -45,16 +48,34 @@ class ReplyInterruption:
         if message_id in received:
             return
         received.append(message_id)
+        for old_source in received[:-64]:
+            self.senders.pop((session_id, old_source), None)
         del received[:-64]
+        info = message.get('message_info') or {}
+        sender = (info.get('user_info') or {}).get('user_id')
+        if info.get('group_info') and isinstance(sender, str) and sender:
+            self.senders[(session_id, message_id)] = sender
+            key = (session_id, sender)
+            author_received = self.group_received.setdefault(key, [])
+            self.group_received.move_to_end(key)
+            author_received.append(message_id)
+            del author_received[:-64]
         for task, turn in self.pending.items():
-            if turn.received is received and turn.stale:
+            if turn.stale:
                 task.cancel()
+        for old_key in list(self.group_received)[:-4096]:
+            old = self.group_received[old_key]
+            if any(turn.received is old for turn in self.pending.values()):
+                continue
+            self.group_received.pop(old_key)
         # 活动请求保留其列表引用；只回收没有生成任务的旧会话。
         for old_id in list(self.received)[:-4096]:
             old = self.received[old_id]
             if any(turn.received is old for turn in self.pending.values()):
                 continue
             self.received.pop(old_id)
+            for old_source in old:
+                self.senders.pop((old_id, old_source), None)
             self.turns.pop(old_id, None)
             self.reply_turns.pop(old_id, None)
 
@@ -70,6 +91,13 @@ class ReplyInterruption:
                  for part in item.get('parts', []) if part.get('type') == 'text']
         source_id = next((source for source in reversed(received)
                           if any(text.startswith(f'<message msg_id="{escape(source, quote=True)}" ') for text in texts)), None)
+        sender = self.senders.get((session_id, source_id or ''))
+        if sender is not None:
+            # 群聊按本轮源消息发送者跟踪补充，其他成员插话仍留在原生上下文。
+            received = self.group_received.setdefault(
+                (session_id, sender),
+                [source for source in received if self.senders.get((session_id, source)) == sender],
+            )
         current = self.turns.get(session_id)
         if current is None or current.source_id != source_id:
             self.turns[session_id] = ReplyTurn(source_id, received)
@@ -103,5 +131,7 @@ class ReplyInterruption:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.pending.clear()
         self.received.clear()
+        self.group_received.clear()
+        self.senders.clear()
         self.turns.clear()
         self.reply_turns.clear()
