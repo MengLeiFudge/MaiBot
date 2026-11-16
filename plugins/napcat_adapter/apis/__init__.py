@@ -4,7 +4,7 @@ from .account import NapCatAccountApiMixin
 from .file import NapCatFileApiMixin
 from .group import NapCatGroupApiMixin
 from .message import NapCatMessageApiMixin
-from . import message_tool_patch as _message_tool_patch  # noqa: F401  # Register message tools.
+from . import message_tool_patch as _message_tool_patch
 from .support import NapCatApiSupportMixin
 from .system import NapCatSystemApiMixin
 

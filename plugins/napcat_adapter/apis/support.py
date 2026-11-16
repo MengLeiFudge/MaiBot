@@ -206,26 +206,19 @@ class NapCatApiSupportMixin:
         self,
         action_name: str,
         params: NapCatApiParamsInput = None,
-        *,
-        timeout_sec: float | None = None,
     ) -> NapCatActionResponse:
         """调用 NapCat 动作并返回原始响应。
 
         Args:
             action_name: NapCat 动作名称。
             params: 传递给 NapCat 的动作参数。
-            timeout_sec: 单次动作的可选有限超时；留空时使用连接配置默认值。
 
         Returns:
             Dict[str, Any]: NapCat 返回的原始响应字典。
         """
         normalized_action_name = self._normalize_non_empty_string(action_name, "action_name")
         normalized_params = self._normalize_params(params)
-        return await self._require_action_service().call_action(
-            normalized_action_name,
-            normalized_params,
-            timeout_sec=timeout_sec,
-        )
+        return await self._require_action_service().call_action(normalized_action_name, normalized_params)
 
     async def _call_napcat_action_data(
         self,

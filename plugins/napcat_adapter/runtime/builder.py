@@ -7,7 +7,6 @@ from typing import Any, Awaitable, Callable, Coroutine
 from ..codecs.inbound import NapCatInboundCodec
 from ..codecs.notice import NapCatNoticeCodec
 from ..codecs.outbound import NapCatOutboundCodec
-from ..codecs.request import NapCatRequestCodec
 from ..filters import NapCatChatFilter, NapCatNoticeFilter, NapCatRegexFilter
 from ..heartbeat_monitor import NapCatHeartbeatMonitor
 from ..runtime_state import NapCatRuntimeStateManager
@@ -71,7 +70,6 @@ class NapCatRuntimeBuilder:
         ban_state_store = NapCatBanStateStore(self._logger)
         inbound_codec = NapCatInboundCodec(self._logger, query_service)
         notice_codec = NapCatNoticeCodec(self._logger, query_service)
-        request_codec = NapCatRequestCodec(query_service)
         runtime_state = NapCatRuntimeStateManager(
             gateway_capability=self._gateway_capability,
             logger=self._logger,
@@ -102,7 +100,6 @@ class NapCatRuntimeBuilder:
             official_bot_guard=official_bot_guard,
             outbound_codec=outbound_codec,
             query_service=query_service,
-            request_codec=request_codec,
             regex_filter=regex_filter,
             runtime_state=runtime_state,
             transport=transport,

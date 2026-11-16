@@ -498,13 +498,7 @@ class NapCatFileApiMixin(NapCatApiSupportMixin):
         """
         return await self._call_napcat_action("upload_file_stream", params)
 
-    @API(
-        "adapter.napcat.file.upload_group_file",
-        description="上传群文件",
-        version="1",
-        public=True,
-        timeout_ms=900000,
-    )
+    @API("adapter.napcat.file.upload_group_file", description="上传群文件", version="1", public=True)
     async def api_action_upload_group_file(self, params: NapCatApiParamsInput = None) -> Dict[str, Any]:
         """调用 NapCat 的 ``upload_group_file`` 动作。
 
@@ -514,11 +508,7 @@ class NapCatFileApiMixin(NapCatApiSupportMixin):
         Returns:
             Dict[str, Any]: NapCat 返回的原始响应字典。
         """
-        return await self._call_napcat_action(
-            "upload_group_file",
-            params,
-            timeout_sec=900.0,
-        )
+        return await self._call_napcat_action("upload_group_file", params)
 
     @API("adapter.napcat.file.upload_image_to_qun_album", description="上传图片到群相册", version="1", public=True)
     async def api_action_upload_image_to_qun_album(self, params: NapCatApiParamsInput = None) -> Dict[str, Any]:
