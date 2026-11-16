@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -44,11 +45,12 @@ VIDEO_CAPABILITY = (
     "用户询问能否看视频时，请说明可发送视频链接或附件，不要笼统声称不支持视频。"
     "读取状态以本次请求为准：附有[视频分镜已读取]及对应分镜图时，该视频本次已成功读取，"
     "取代先前规划或聊天记录中的下载失败、TLS失败判断，请依据本次图片和字幕回答。"
-    "未附入可读画面时说明当前失败原因，不编造画面或声音。"
+    "没有读取结果只表示尚未读取，不能据此声称已经打开、页面为空或站点无法访问。"
+    "未附入可读画面时如实区分未读取与实际读取失败，不编造画面或声音。"
 )
 VIDEO_DOMAINS = (
     "b23.tv", "bilibili.com", "bili2233.cn", "youtube.com", "youtu.be", "x.com", "twitter.com",
-    "douyin.com", "xhslink.com", "xiaohongshu.com", "weibo.com", "v.qq.com", "ixigua.com",
+    "douyin.com", "xhslink.com", "xiaohongshu.com", "weibo.com", "v.qq.com", "ixigua.com", "bad.news",
 )
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi", ".flv"}
 URL_PATTERN = re.compile(r"https?://[^\s\"'<>，。；）]+", re.IGNORECASE)
@@ -60,6 +62,22 @@ class VideoError(RuntimeError):
 
 class VideoConnectionError(VideoError):
     """可在下载预算内重试的临时连接中断。"""
+
+
+class PageVideoParser(HTMLParser):
+    """只读取页面声明的主视频元数据，不从推荐列表挑选媒体。"""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.videos: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "meta":
+            return
+        values = dict(attrs)
+        key, content = values.get("property"), values.get("content")
+        if key in {"og:video", "og:video:url", "og:video:secure_url"} and content:
+            self.videos[key] = content
 
 
 @dataclass(frozen=True)
@@ -133,6 +151,8 @@ def find_video_sources(text: str) -> list[VideoSource]:
         except ValueError:
             continue
         page = any(host == domain or host.endswith("." + domain) for domain in VIDEO_DOMAINS)
+        if host == "bad.news" or host.endswith(".bad.news"):
+            page = re.fullmatch(r"/t/[0-9]+/?", parsed.path) is not None
         labeled = re.search(r"链接\s*[:：]\s*$", normalized[max(0, match.start() - 12):match.start()]) is not None
         direct = Path(parsed.path).suffix.lower() in VIDEO_SUFFIXES or attachment and labeled and not page
         if direct or page:
@@ -327,6 +347,50 @@ class VideoReader:
             self._cache[cache_key] = (time.monotonic(), result)
         return result
 
+    async def _read_page_video(self, url: str) -> str:
+        """取得 bad.news 原帖声明的 MP4，页面和重定向均有界读取。"""
+        resolver = PublicResolver()
+        proxies = getproxies()
+        proxy = proxies.get("https") or proxies.get("http")
+        try:
+            connector = aiohttp.TCPConnector(resolver=resolver)
+            async with asyncio.timeout(20), aiohttp.ClientSession(
+                connector=connector, headers={"User-Agent": "Mozilla/5.0"},
+            ) as session:
+                current_url = url
+                for attempt in range(4):
+                    _validate_url(current_url)
+                    parsed = urlsplit(current_url)
+                    if (parsed.hostname not in {"bad.news", "www.bad.news"}
+                            or parsed.path.rstrip("/") != urlsplit(url).path.rstrip("/")):
+                        raise VideoError("视频页面跳转到其他页面，未取得原帖视频")
+                    async with session.get(current_url, proxy=proxy, allow_redirects=False) as response:
+                        if response.status in {301, 302, 303, 307, 308}:
+                            location = response.headers.get("Location")
+                            if not location or attempt == 3:
+                                raise VideoError("视频页面重定向过多或缺少目标地址")
+                            current_url = urljoin(current_url, location)
+                            continue
+                        if response.status >= 400:
+                            raise VideoError(f"视频页面读取失败（HTTP {response.status}）")
+                        body = bytearray()
+                        async for chunk in response.content.iter_chunked(64 * 1024):
+                            body.extend(chunk)
+                            if len(body) > 2 * 1024 * 1024:
+                                raise VideoError("视频页面超过2 MiB，未完成解析")
+                        parser = PageVideoParser()
+                        parser.feed(body.decode(response.charset or "utf-8", errors="replace"))
+                        for key in ("og:video:secure_url", "og:video:url", "og:video"):
+                            video_url = urljoin(current_url, parser.videos.get(key, ""))
+                            _validate_url(video_url)
+                            media = urlsplit(video_url)
+                            if media.hostname == "video.twimg.com" and Path(media.path).suffix.lower() == ".mp4":
+                                return video_url
+                        raise VideoError("视频页面未提供可读取的原帖MP4，未读取推荐列表")
+        finally:
+            await resolver.close()
+        raise VideoError("未取得有效的视频页面响应")
+
     async def _download(self, source: VideoSource, folder: Path) -> tuple[Path, str, Path | None]:
         """取得视频与字幕，在同一预算内重试临时网页下载中断。
 
@@ -349,16 +413,23 @@ class VideoReader:
                 raise VideoError("本机视频文件为空")
             return video, video.name, None
         _validate_url(source.url)
+        page_url = ""
+        if urlsplit(source.url).hostname in {"bad.news", "www.bad.news"}:
+            page_url = source.url
+            source = VideoSource(await self._read_page_video(page_url), direct=True)
         if source.direct:
             video = folder / "video.mp4"
             resolver = PublicResolver()
             try:
                 connector = aiohttp.TCPConnector(resolver=resolver)
-                async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=60)) as session:
+                proxies = getproxies()
+                proxy = (proxies.get("https") or proxies.get("http")) if page_url else None
+                headers = {"Referer": page_url, "User-Agent": "Mozilla/5.0"} if page_url else {}
+                async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as session:
                     current_url = source.url
                     for attempt in range(6):
                         _validate_url(current_url)
-                        async with session.get(current_url, allow_redirects=False) as response:
+                        async with session.get(current_url, proxy=proxy, allow_redirects=False) as response:
                             if response.status in {301, 302, 303, 307, 308}:
                                 location = response.headers.get("Location")
                                 if not location or attempt == 5:
