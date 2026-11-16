@@ -18,9 +18,9 @@ PRIVATE_MESSAGE_SETTLE_SECONDS = 2.0
 
 
 class PluginSection(PluginConfigBase):
-    """私聊连发收集和普通引用展开的启用状态。"""
+    """连发收集、普通引用展开和短回复完整发送的启用状态。"""
 
-    enabled: bool = Field(default=False, description="收集主人连发消息，并提供同会话引用原文")
+    enabled: bool = Field(default=False, description="收集主人连发和引用，保留本账号短回复的完整句子")
     config_version: str = Field(default="0.1.0", description="配置版本")
 
 
@@ -43,7 +43,7 @@ def _meta(turn_id: str | None = None) -> dict[str, object]:
 
 
 class QQBotReplyGuardPlugin(MaiBotPlugin):
-    """收集主人连发与引用资料，回复决策和正文均由原生流程处理。"""
+    """收集连发与引用，保留短回复的完整表达，生成和发送仍走原生流程。"""
 
     config_model: ClassVar[type[PluginConfigBase] | None] = GuardConfig
 
@@ -55,9 +55,9 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         self._received: OrderedDict[str, tuple[str, float]] = OrderedDict()
 
     async def on_load(self) -> None:
-        """启用私聊连发收集与引用展开。"""
+        """启用连发收集、引用展开与短回复完整发送。"""
         self._active = True
-        self.ctx.logger.info("私聊连发收集与引用补充已加载，启用=%s", cast(GuardConfig, self.config).plugin.enabled)
+        self.ctx.logger.info("连发收集、引用与短回复完整发送已加载，启用=%s", cast(GuardConfig, self.config).plugin.enabled)
 
     async def on_unload(self) -> None:
         """丢弃未完成快照；插件没有后台任务或持久化状态。"""
@@ -233,6 +233,29 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         }}
 
     @HookHandler(
+        "maisaka.reply.before_post_process", name="qqbot_reply_guard_short_reply",
+        description="短回复保留完整句子和标点，长回复沿用原生分段",
+        mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=3000, error_policy=ErrorPolicy.SKIP,
+    )
+    async def preserve_short_reply(
+        self, session_id: str = "", response: str = "", skip_post_process: bool = False,
+        enable_splitter: bool = True, **kwargs: Any,
+    ) -> dict[str, object]:
+        """只关闭本次短回复的随机拆分，原生清理、错别字及发送选项保持。"""
+        config = cast(GuardConfig, self.config)
+        if not self._active or not config.plugin.enabled or not response.strip() or skip_post_process or not enable_splitter:
+            return {"action": "continue"}
+        if await self.ctx.config.get("bot.qq_account", "") != config.guard.bot_qq:
+            return {"action": "continue"}
+        max_length = int(await self.ctx.config.get("response_splitter.max_length", 512))
+        if len(response.strip()) > max_length:
+            return {"action": "continue"}
+        return {"action": "continue", "modified_kwargs": {
+            **kwargs, "session_id": session_id, "response": response,
+            "skip_post_process": skip_post_process, "enable_splitter": False,
+        }}
+
+    @HookHandler(
         "maisaka.replyer.before_request",
         name="qqbot_reply_guard_search_context",
         description="为原生回复器提供本轮同会话引用原文",
@@ -260,5 +283,5 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
 
 
 def create_plugin() -> MaiBotPlugin:
-    """创建通过公开 Hook 收集连发与展开引用的插件。"""
+    """创建通过公开 Hook 收集连发、展开引用并保留短回复的插件。"""
     return QQBotReplyGuardPlugin()

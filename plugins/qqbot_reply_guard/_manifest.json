@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "mlj.qqbot-reply-guard",
-  "version": "0.5.0",
-  "name": "QQBot 私聊连发与引用",
-  "description": "收集主人私聊连续补充，向原生规划和回复器提供同会话引用原文。",
+  "version": "0.5.1",
+  "name": "QQBot 连发、引用与短回复",
+  "description": "收集主人私聊连续补充和同会话引用，保留本账号短回复的完整句子与标点。",
   "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
   "license": "MIT",
   "urls": {
