@@ -159,10 +159,10 @@ class CPASessionPlugin(MaiBotPlugin):
         extra = dict(request["extra_params"])
         headers = {
             key: value for key, value in (extra.get("headers") or {}).items()
-            if key.lower() not in {"x-client-request-id", "user-agent"}
+            if key.lower() not in {"x-client-request-id", "x-opencode-session", "user-agent"}
         }
         headers.update({
-            "X-Client-Request-Id": quote(session_id, safe=":"),
+            "x-opencode-session": quote(session_id, safe=":"),
             "User-Agent": "QQBot/MaiBot-cpa-session/0.1.1",
         })
         extra["headers"] = headers

@@ -1,6 +1,6 @@
 # CPA 会话透传
 
-本地 Provider 插件通过 Planner、Replyer 的公开 Hook 取得真实会话 ID，并将其写入请求级 `X-Client-Request-Id`。CPA 按现有配置转为 OpenCode Go 的 `x-opencode-session`。请求使用自身 UA，版本与插件发布版本一致。
+本地 Provider 插件通过 Planner、Replyer 的公开 Hook 取得真实会话 ID，并将其写入请求级 `x-opencode-session`，由 CPA 透传给 OpenCode Go。请求使用自身 UA，版本与插件发布版本一致。
 
 启用 `config.toml` 的 `plugin.enabled`，把 `config/model_config.toml` 中指向 CPA 的生成 provider 的 `client_type` 改成 `cpa_responses`，然后重启 MaiBot。保留 provider 名称、`deepseek-flash` 模型名、地址、密钥及生成参数。夜凛启动允许表已包含本传输插件。
 
