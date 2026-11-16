@@ -17,6 +17,9 @@ behavior_style = """
 planner_mode = "multimodal"
 replyer_mode = "multimodal"
 wait_image_recognize_max_time = 15.0 # 文本规划最多等后台图片描述 15 秒；不改变识图任务自身超时。
+handle_oversized_images = true
+max_image_size_mb = 1.0 # 单张超过 1 MiB 时由原生入站链路压缩。
+oversized_image_handle_method = "compress"
 
 [emoji]
 steal_emoji = true
