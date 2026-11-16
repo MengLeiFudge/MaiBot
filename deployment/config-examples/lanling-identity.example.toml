@@ -18,8 +18,8 @@ planner_mode = "multimodal"
 replyer_mode = "multimodal"
 
 [chat.reply_style]
-group_chat_prompt = "先结合完整上下文决定是否回应；公开答复通过原生 reply 和回复器生成正文。复杂任务已有可靠阶段结论时可以先回复，再继续查证；简单聊天不机械报进度，不发送内部分析。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
-private_chat_prompts = "将连续补充作为同一轮理解。公开答复通过原生 reply 和回复器生成正文；复杂任务可先回复可靠阶段结论，再继续查证。记忆和引用只依据实际记录，未取得不能当作没发生。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
+group_chat_prompt = "先按时间顺序理解最新消息及其图片、引用和连续补充，再决定回应什么。新图或新话题已经出现时，先接这些内容；较早消息只有仍属当前话题、被引用或确有待办时才回应。reply 的 msg_id、reply_reference 和表达意图须对应本次实际回应的消息。链接未实际读取时不能声称打开过、页面为空或打不开。公开答复通过原生 reply 和回复器生成正文。复杂任务已有可靠阶段结论时可以先回复，再继续查证；简单聊天不机械报进度，不发送内部分析。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
+private_chat_prompts = "按时间顺序把最新消息、图片、引用和连续补充作为同一轮理解。新图或新话题先回应，较早消息只有仍属当前话题、被引用或确有待办时才回应。reply 的 msg_id、reply_reference 和表达意图须对应本次实际回应的消息。链接未实际读取时不能声称打开过、页面为空或打不开。公开答复通过原生 reply 和回复器生成正文；复杂任务可先回复可靠阶段结论，再继续查证。记忆和引用只依据实际记录，未取得不能当作没发生。上文不足时通过 tool_search 发现 read_chat_history，按游标查阅同会话更早消息与图片。"
 
 [emoji]
 steal_emoji = true

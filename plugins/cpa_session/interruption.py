@@ -16,6 +16,7 @@ class ReplyTurn:
     source_id: str | None
     received: list[str]
     first_sent: bool = False
+    proactive_item_id: str = ""
 
     @property
     def stale(self) -> bool:
@@ -70,9 +71,18 @@ class ReplyInterruption:
                  for part in item.get('parts', []) if part.get('type') == 'text']
         source_id = next((source for source in reversed(received)
                           if any(text.startswith(f'<message msg_id="{escape(source, quote=True)}" ') for text in texts)), None)
+        proactive_item_id = next((
+            item['meta']['item_id'] for item in reversed(items)
+            if item.get('item_type') == 'UserMessageItem' and any(
+                part.get('type') == 'text' and part.get('text', '').startswith('<plugin_proactive_task ')
+                for part in item.get('parts', [])
+            )
+        ), '')
         current = self.turns.get(session_id)
-        if current is None or current.source_id != source_id:
-            self.turns[session_id] = ReplyTurn(source_id, received)
+        # 主动续聊可以复用同一条用户消息，但不能继承上一轮已经送达的状态。
+        if (current is None or current.source_id != source_id
+                or proactive_item_id and current.proactive_item_id != proactive_item_id):
+            self.turns[session_id] = ReplyTurn(source_id, received, proactive_item_id=proactive_item_id)
 
     async def request(
         self, client: BaseClient, request: ResponseRequest, turn: ReplyTurn | None,
