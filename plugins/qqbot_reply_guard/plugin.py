@@ -8,6 +8,7 @@ from typing import Any, ClassVar, cast
 
 import asyncio
 import json
+import re
 import time
 import uuid
 
@@ -15,6 +16,10 @@ from maibot_sdk import CONFIG_RELOAD_SCOPE_SELF, Field, HookHandler, MaiBotPlugi
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 
 PRIVATE_MESSAGE_SETTLE_SECONDS = 2.0
+SHORT_REPLY_SPACING = re.compile(
+    r'“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"]*"|\'[^\']*\'|`[^`]*`'
+    r'|(?P<break>(?<=[\u3400-\u9fff。！？!?…~～”’」』])[ \t]+(?=[\u3400-\u9fff“‘「『]))'
+)
 
 
 class PluginSection(PluginConfigBase):
@@ -234,14 +239,14 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
 
     @HookHandler(
         "maisaka.reply.before_post_process", name="qqbot_reply_guard_short_reply",
-        description="短回复保留完整句子和标点，长回复沿用原生分段",
+        description="短回复将中文句间空格排成段落，保留英文和引用中的空格",
         mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=3000, error_policy=ErrorPolicy.SKIP,
     )
     async def preserve_short_reply(
         self, session_id: str = "", response: str = "", skip_post_process: bool = False,
         enable_splitter: bool = True, **kwargs: Any,
     ) -> dict[str, object]:
-        """只关闭本次短回复的随机拆分，原生清理、错别字及发送选项保持。"""
+        """短回复保留完整句子，并将引用外的中文句间水平空白恢复为换行。"""
         config = cast(GuardConfig, self.config)
         if not self._active or not config.plugin.enabled or not response.strip() or skip_post_process or not enable_splitter:
             return {"action": "continue"}
@@ -250,8 +255,11 @@ class QQBotReplyGuardPlugin(MaiBotPlugin):
         max_length = int(await self.ctx.config.get("response_splitter.max_length", 512))
         if len(response.strip()) > max_length:
             return {"action": "continue"}
+        formatted = SHORT_REPLY_SPACING.sub(
+            lambda match: "\n" if match.lastgroup == "break" else match.group(), response,
+        )
         return {"action": "continue", "modified_kwargs": {
-            **kwargs, "session_id": session_id, "response": response,
+            **kwargs, "session_id": session_id, "response": formatted,
             "skip_post_process": skip_post_process, "enable_splitter": False,
         }}
 

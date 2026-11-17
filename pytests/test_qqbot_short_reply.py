@@ -156,6 +156,41 @@ class ShortReplyTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.store.await_count, 1)
         self.assertEqual(self.history.call_count, 1)
 
+    async def test_chinese_sentence_spaces_become_line_breaks_at_gateway(self):
+        cases = (
+            ("资料看完了，条目也核对好了 接下来整理结果", "资料看完了，条目也核对好了\n接下来整理结果"),
+            ("知道啦~  \t刚刚已经记下了", "知道啦~\n刚刚已经记下了"),
+        )
+        for original, expected in cases:
+            with self.subTest(text=original):
+                self.text = original
+                self.clock += 100
+                self.deliveries.clear()
+                with patch.object(chat_utils, "split_into_sentences_w_remove_punctuation",
+                                  side_effect=AssertionError("显式段落不应进入随机拆分")):
+                    result = await self.send_reply()
+                self.assertTrue(result.success, result.error_message)
+                self.assertEqual(result.structured_content["reply_segments"], [expected])
+                self.assertEqual([message.processed_plain_text for message, _ in self.deliveries], [expected])
+                self.assertEqual("".join(expected.split()), "".join(original.split()))
+
+    async def test_english_numbers_units_and_quoted_spaces_are_preserved(self):
+        cases = (
+            "状态是 403 Forbidden，先检查 API Key 再看日志",
+            "英文 Hello world，数值 3.5 kg，状态 403 打不开",
+            '原文是“机器 学习”，代码是`保存 记录`，状态是"待 处理"',
+            "原文是「机器 学习」和『待 处理』，也有‘两个 词’和'待 处理'",
+        )
+        for original in cases:
+            with self.subTest(text=original):
+                self.text = original
+                self.clock += 100
+                self.deliveries.clear()
+                result = await self.send_reply()
+                self.assertTrue(result.success, result.error_message)
+                self.assertEqual(result.structured_content["reply_segments"], [original])
+                self.assertEqual([message.processed_plain_text for message, _ in self.deliveries], [original])
+
     async def test_length_boundary_applies_to_private_and_group_replies(self):
         self.max_length = 20
         for session in ("isolated-private", "isolated-group"):
