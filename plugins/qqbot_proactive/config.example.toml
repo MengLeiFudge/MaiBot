@@ -1,0 +1,18 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[proactive]
+# 仅启用在这个机器人实例；主人 QQ 从 qqbot_identity 本机配置读取。
+bot_qq = "2629227874"
+min_idle_seconds = 180.0
+max_idle_seconds = 300.0
+# 实际发出两轮而无人回应后，之后每轮使用 30–60 分钟长间隔。
+max_unanswered_turns = 2
+min_retry_seconds = 1800.0
+max_retry_seconds = 3600.0
+# 静默窗口只暂停主动联系，正常聊天仍可回复；两者相同表示关闭。
+quiet_start_hour = 0
+quiet_end_hour = 8
+# 日程由已有工作区文件工具维护，不额外调用模型生成。
+day_plan_file = "D:/project/yelin/计划/日程.json"
