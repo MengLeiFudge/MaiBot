@@ -63,6 +63,15 @@ class NapCatInboundCodec(NapCatInboundCardMixin, NapCatInboundTextMixin):
             timestamp_seconds = time.time()
 
         additional_config: Dict[str, Any] = {"self_id": self_id, "napcat_message_type": message_type}
+        source_segments = payload.get("message")
+        if isinstance(source_segments, list):
+            source_segment_types = [
+                str(segment.get("type") or "").strip().lower()
+                for segment in source_segments
+                if isinstance(segment, Mapping) and str(segment.get("type") or "").strip()
+            ]
+            if source_segment_types:
+                additional_config["napcat_segment_types"] = source_segment_types
         if group_id:
             additional_config["platform_io_target_group_id"] = group_id
         else:
@@ -473,6 +482,9 @@ class NapCatInboundCodec(NapCatInboundCardMixin, NapCatInboundTextMixin):
             parts.append(f"文件: {file_name}")
         if file_size:
             parts.append(f"大小: {file_size}")
+        media_url = str(segment_data.get("url") or "").strip()
+        if media_url:
+            parts.append(f"链接: {media_url}")
         if parts:
             return self._build_text_segment(f"[视频] {'，'.join(parts)}")
         return self._build_text_segment("[视频]")

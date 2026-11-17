@@ -17,6 +17,16 @@
 - [File 透传 API](./file-api.md)
 - [核验与兼容性说明](./verification.md)
 
+## 本地部署行为
+
+`runtime/router.py` 的 `NapCatEventRouter.handle_request_event` 自动同意好友申请、邀请机器人入群和成员加群申请。申请在接入层消费，不注入聊天、记忆或模型，也不受普通聊天名单影响。成功申请在当前连接内按申请类型、子类型和 flag 摘要去重，最多保留 1024 项；失败不记为成功，等待协议端再次上报，缺失 flag 或未知类型只记录并消费。
+
+`codecs/inbound/message_codec.py` 保留 `additional_config.napcat_segment_types` 和视频消息的原始 URL，供视频插件识别和读取真实来源；链接存在不代表已经看过视频。
+
+`apis/file.py` 的 `upload_group_file` 使用 900 秒 SDK API 超时，并经 `apis/support.py`、`services/action_service.py` 将 900 秒传给 `transport.py` 的单次 OneBot 调用。其他动作沿用 `napcat_server.action_timeout_sec`。
+
+更新本地适配器源码时，必须保留以上三条处理链及 1.4.1 已有配置行为；交付前静态核对 request 不经过消息注入、视频来源能到达视频插件、上传超时能传到传输层。编译和类型检查通过后，按根入口重启并确认适配器加载与连接；申请和上传的实际副作用验证遵守项目授权，不以 ready 代替功能验收。
+
 ## 先看调用方式
 
 ### 强类型封装 API

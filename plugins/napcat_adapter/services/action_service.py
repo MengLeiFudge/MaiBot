@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, cast
 
 import asyncio
 
@@ -11,8 +11,8 @@ try:
 
     AIOHTTP_AVAILABLE = True
 except ImportError:
-    ClientSession = None  # type: ignore[assignment]
-    ClientTimeout = None  # type: ignore[assignment]
+    ClientSession = cast(Any, None)
+    ClientTimeout = cast(Any, None)
     AIOHTTP_AVAILABLE = False
 
 if TYPE_CHECKING:
@@ -32,12 +32,19 @@ class NapCatActionService:
         self._logger = logger
         self._transport = transport
 
-    async def call_action(self, action_name: str, params: Mapping[str, Any]) -> Dict[str, Any]:
+    async def call_action(
+        self,
+        action_name: str,
+        params: Mapping[str, Any],
+        *,
+        timeout_sec: float | None = None,
+    ) -> Dict[str, Any]:
         """调用 OneBot 动作并要求返回成功结果。
 
         Args:
             action_name: OneBot 动作名称。
             params: 动作参数。
+            timeout_sec: 单次动作的可选有限超时；留空时使用连接配置默认值。
 
         Returns:
             Dict[str, Any]: NapCat 返回的原始响应字典。
@@ -47,7 +54,11 @@ class NapCatActionService:
         """
         normalized_params = {str(key): value for key, value in params.items()}
         try:
-            response = await self._transport.call_action(action_name, normalized_params)
+            response = await self._transport.call_action(
+                action_name,
+                normalized_params,
+                timeout_sec=timeout_sec,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

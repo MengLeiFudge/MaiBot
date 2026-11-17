@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from hashlib import sha256
 from typing import Any, Callable, Dict, Mapping, Optional, Protocol
 
 import asyncio
@@ -10,6 +12,8 @@ from ..codecs.notice.helpers import resolve_actor_user_id
 from ..config import NapCatPluginSettings
 from ..types import NapCatPayloadDict
 from .bundle import NapCatRuntimeBundle
+
+MAX_APPROVED_REQUESTS = 1024
 
 
 class _GatewayCapabilityProtocol(Protocol):
@@ -51,6 +55,8 @@ class NapCatEventRouter:
         self._gateway_name = gateway_name
         self._load_settings = load_settings
         self._runtime: Optional[NapCatRuntimeBundle] = None
+        self._request_lock = asyncio.Lock()
+        self._approved_requests: OrderedDict[tuple[str, str, str], None] = OrderedDict()
 
     def bind_runtime(self, runtime: NapCatRuntimeBundle) -> None:
         """绑定当前路由器使用的运行时依赖。
@@ -61,7 +67,8 @@ class NapCatEventRouter:
         self._runtime = runtime
 
     def reset_caches(self) -> None:
-        """重置与路由相关的短期缓存。"""
+        """重置与路由和协议申请去重相关的短期缓存。"""
+        self._approved_requests.clear()
         runtime = self._runtime
         if runtime is None:
             return
@@ -79,6 +86,9 @@ class NapCatEventRouter:
             return
         if post_type == "notice":
             await self.handle_notice_event(payload)
+            return
+        if post_type == "request":
+            await self.handle_request_event(payload)
             return
         if post_type == "meta_event":
             await self.handle_meta_event(payload)
@@ -205,6 +215,55 @@ class NapCatEventRouter:
         )
         if not accepted:
             self._logger.debug(f"Host 丢弃了 NapCat 通知事件: {external_message_id or dedupe_key or '无消息 ID'}")
+
+    async def handle_request_event(self, payload: NapCatPayloadDict) -> None:
+        """在接入层自动同意好友和群请求，申请不进入聊天或记忆。"""
+        runtime = self._require_runtime()
+        settings = self._load_settings()
+        self_id = str(payload.get("self_id") or "").strip()
+        if self_id:
+            await runtime.runtime_state.report_connected(self_id, settings.napcat_server)
+
+        request_type = str(payload.get("request_type") or "").strip()
+        sub_type = str(payload.get("sub_type") or "").strip()
+        if request_type == "friend":
+            action = "set_friend_add_request"
+        elif request_type == "group" and sub_type in {"add", "invite"}:
+            action = "set_group_add_request"
+        else:
+            self._logger.debug(f"NapCat 未支持的请求事件已消费: {request_type}.{sub_type}")
+            return
+
+        flag = str(payload.get("flag") or "").strip()
+        if not flag:
+            self._logger.warning(f"NapCat 请求缺少 flag，无法自动同意: {request_type}.{sub_type}")
+            return
+
+        params: Dict[str, Any] = {"flag": flag, "approve": True}
+        if request_type == "group":
+            params["sub_type"] = sub_type
+        key = (request_type, sub_type, sha256(flag.encode("utf-8")).hexdigest())
+        async with self._request_lock:
+            if key in self._approved_requests:
+                return
+            try:
+                await runtime.action_service.call_action(action, params)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # 失败不记为已处理，等待协议端再次上报；申请始终不进入聊天。
+                self._logger.warning(f"NapCat 自动同意请求失败: action={action} self_id={self_id} error={exc}")
+                return
+
+            self._approved_requests[key] = None
+            if len(self._approved_requests) > MAX_APPROVED_REQUESTS:
+                self._approved_requests.popitem(last=False)
+            user_id = str(payload.get("user_id") or "").strip()
+            group_id = str(payload.get("group_id") or "").strip()
+            self._logger.info(
+                f"NapCat 已自动同意请求: action={action} self_id={self_id} "
+                f"user_id={user_id} group_id={group_id} sub_type={sub_type}"
+            )
 
     async def emit_natural_lift_notice(self, payload: NapCatPayloadDict) -> None:
         """注入一条由适配器合成的自然解除禁言通知。
