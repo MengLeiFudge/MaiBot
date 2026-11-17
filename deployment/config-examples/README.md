@@ -2,8 +2,7 @@
 
 MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider key 等本机信息，因此不进入 Git。首次部署先按当前稳定版生成完整 `config/bot_config.toml` 和 `config/model_config.toml`，再应用本目录中的固定部署值：
 
-- `bot-identity.example.toml`：星遥 QQ、显示名和独立监听端口。
-- `lanling-identity.example.toml`：蓝铃身份及独立监听端口；应用到独立 `maibot-lanling/` 工作目录。
+- `bot-identity.example.toml`：风铃 QQ、角色、显示名和独立监听端口；保留技术 Target `xingyao`。
 - `provider.example.toml`：只展示 provider 字段形状；`api_key` 必须在本机实际配置中填写。
 - `napcat-adapter.example.toml`：合并到 `plugins/napcat_adapter/config.toml`，在适配器入口阻止已知机器人互相触发。
 
@@ -11,12 +10,14 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 启动前还要确认：
 
-- 本实例 `plugins/napcat_adapter/config.toml` 使用 `127.0.0.1:6202` 和 `connection_id = "xingyao"`。按 `napcat-adapter.example.toml` 配置全局禁止发送者名单，包含另外四个机器人账号。该名单先于私聊/群聊名单开关执行，不依赖业务插件。
+- 本实例 `plugins/napcat_adapter/config.toml` 使用 `127.0.0.1:6202` 和 `connection_id = "xingyao"`。按 `napcat-adapter.example.toml` 配置全局禁止发送者名单，包含另外三个现行机器人账号。该名单先于私聊/群聊名单开关执行，不依赖业务插件。
 - `plugins/qqbot_poke/config.toml`、`plugins/qqbot_knowledge/config.toml`、`plugins/qqbot_identity/config.toml`、`plugins/qqbot_visual/config.toml`、`plugins/qqbot_web_search/config.toml` 和 `plugins/qqbot_reply_timing/config.toml` 的顶层 `plugin.enabled` 为 `true`。知识插件通过 `127.0.0.1:8081` 使用云栖的共享 DSP 向量检索服务；身份插件在本机 `[identity].owner_qq` 填写真正主人 QQ，示例保持留空。
-- 其余 `plugins/qqbot_*/config.toml` 的顶层 `plugin.enabled` 为 `false`。
+- 同时启用 `org_orge-8_better-diary`、`qqbot_diary`、`qqbot_workspace`、`qqbot_proactive` 和 `qqbot_reply_guard`，合计十三个通用插件；其余 `plugins/qqbot_*/config.toml` 的 `plugin.enabled` 为 `false`。各插件说明见其 README，完整名单见根 [聊天实例配置](../../../docs/chat-instances.md)。
 - `src/plugins/built_in/plugin_management/config.toml` 为禁用状态。
 
-`scripts/enforce_chat_only.py` 会在 Core 启动前复核并纠正后两项；配置无法解析时会阻止启动。`scripts/start.ps1` 通过 `read_startup_config.py` 从本实例完整配置读取名称和 WebUI 端口，PID、日志、数据库与虚拟环境均位于各自工作目录。首次部署星遥使用全新 `data/`，不复制其他账号的记忆、登录态或数据库。
+`scripts/enforce_chat_only.py` 在 Core 启动前校验允许列表、配置及聊天插件管理禁用状态，无法确认时停止。`scripts/start.ps1` 从本实例完整配置读取名称和端口，各自维护 PID、日志、数据库和虚拟环境。风铃使用全新角色数据，不继承星遥或注销账号的经历；原数据可恢复归档在根 `.codex/trash/`。
+
+风铃个人工作区为 `D:/project/fengling`。文件工具首次部署等待真实主人私聊绑定，绑定前不注册工具；不伪造会话 ID。better-diary 每天 23:30 从本账号主人私聊生成成品，参考 `better-diary.example.toml`，默认不公开发布空间，也不补写新角色建立前的旧日记；`qqbot_diary` 导出到自己的 `日记/better-diary`，不复制蓝铃的日记、记忆或状态。
 
 `bot-identity.example.toml` 的 `[personality].behavior_style` 为 Planner 指定收尾条件：当前需求已完成且没有新的待回应消息时结束，不以 `wait` 轮询普通沉默；必要的信息查询完成后仍可继续回答。`max_consecutive_wait_count = 1` 限制连续定时等待。群聊无动作后的退避从 5 分钟起步，连续无动作上限为 10 分钟；私聊不受空闲退避限制，明确提及和 @ 沿用原生强制触发。Focus 状态按框架规则绕过空闲退避。
 
@@ -30,4 +31,4 @@ MaiBot 运行时配置位于项目根 `config/`，整个目录包含 provider ke
 
 `provider.example.toml` 将 Planner、Replyer、识图、记忆与其他文本辅助任务统一设为 `reasoning.effort = "high"`，实际模型仍是支持视觉的 `deepseek-flash`。各任务推理与正文共享 8192 token，任务硬超时 60 秒，provider 请求超时 90 秒；拍一拍使用 `utils` 任务并提供相同输出余量。官网搜索使用独立的 32768 输出上限。输出上限不代表固定消耗量，按正常聊天后的实际账单观察费用。
 
-原生 `[chat.reply_style]` 配置提供阶段答复与按需历史查阅指导，无需额外规则注入插件；普通及阶段答复统一使用原生 `reply`，保留完整人设、回复器、后处理分段和发送流程。[qqbot_reply_timing](../../plugins/qqbot_reply_timing/README.md) 补齐本账号出站消息缺少的 NapCat 连接标识，首条等待仅按后处理后的第一段文字计算，再扣除本轮已耗时；后续分段及研究补充按原速度发送。`planner_interrupt_max_consecutive_count = 10` 允许新消息打断 Planner；[CPA 会话插件](../../plugins/cpa_session/README.md) 补齐首条公开回复成功前的请求取消和过期正文检查，覆盖图片准备、Planner、Replyer 与首条等待。首条成功后继续本轮分段。
+普通及阶段答复统一使用原生 `reply`、回复器、后处理分段及发送流程。[回复时机插件](../../plugins/qqbot_reply_timing/README.md) 补齐出站连接标识与首条等待。[CPA 会话插件](../../plugins/cpa_session/README.md) 取消同发送者新补充到来时的过期请求，群内其他成员不打断当前答复；首条成功后继续本轮分段。原生 `planner_interrupt_max_consecutive_count = 0`，避免与按发送者取消重复。

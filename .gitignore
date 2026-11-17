@@ -396,6 +396,11 @@ start_mac.command
 !/plugins/qqbot_*/
 !/plugins/qqbot_*/**
 /plugins/qqbot_*/tests/
+!/plugins/org_orge-8_better-diary/
+!/plugins/org_orge-8_better-diary/*.py
+!/plugins/org_orge-8_better-diary/*.md
+!/plugins/org_orge-8_better-diary/LICENSE
+!/plugins/org_orge-8_better-diary/_manifest.json
 /plugins/**/config.toml
 /plugins/**/*.db
 /plugins/**/*.db-shm

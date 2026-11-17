@@ -1,0 +1,8 @@
+[plugin]
+enabled = false
+config_version = "0.1.0"
+
+[workspace]
+# 可填已有主人私聊的真实 session_id；留空时等待首次真实主人私聊后自动绑定。
+# 不是 QQ、昵称或自行计算的 ID。本机配置和绑定文件不进入 Git；显式变更后重启插件。
+owner_session_id = ""

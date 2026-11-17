@@ -96,6 +96,6 @@ https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md
 
 本 fork 的行为修改遵守 QQBot 根 AGENTS 的框架核心边界，只使用本地插件、公开 SDK/Hook 与现有配置，不修改 Core、内置模块或已安装框架包。部署插件直接随本 fork 的 plugins/ 源码跟踪，不创建嵌套插件仓库。
 
-本工作树用于星遥，属于棉花糖家族，插件源码和启用策略沿用夜凛；配置、虚拟环境、数据和记忆独立，禁止复制其他账号的运行数据。启动身份与端口来自本项目 config/bot_config.toml，示例见 deployment/config-examples/README.md，跨项目部署见根 docs/chat-instances.md。允许启用 napcat_adapter、cpa_session、qqbot_poke、qqbot_knowledge、qqbot_identity、qqbot_visual、qqbot_web_search、qqbot_reply_timing；其余 qqbot_* 实际与示例配置的顶层 plugin.enabled 必须为 false，聊天插件管理保持禁用。每次 Core 启动前执行 scripts/enforce_chat_only.py，解析或禁用确认失败时停止启动。
+本工作树现用于风铃（3056830689），保留 maibot-xingyao 路径、xingyao Target 与 connection_id。风铃使用全新角色数据，不继承星遥或注销账号的经历。夜凛、蓝铃和风铃对齐十三个通用插件：napcat_adapter、cpa_session、qqbot_poke、qqbot_knowledge、qqbot_identity、qqbot_visual、qqbot_web_search、qqbot_reply_timing、org_orge-8_better-diary、qqbot_diary、qqbot_workspace、qqbot_proactive、qqbot_reply_guard；蓝铃专属模块不复制。配置、虚拟环境、数据、记忆和 D:/project/fengling 工作区独立，不复制其他账号运行数据。其余 qqbot_* 实际与示例配置的 plugin.enabled 必须为 false，聊天插件管理保持禁用。启动前执行 scripts/enforce_chat_only.py，校验失败时停止。身份与端口来自 config/bot_config.toml；部署说明见 deployment/config-examples/README.md 与根 docs/chat-instances.md。
 
 本地运行配置和主人的真实 QQ 不进 Git；qqbot_identity 的 owner_qq 只填入本机插件 config.toml，示例留空。视频、历史阅读与身份的公开 Hook 边界见对应插件 README 和 deployment/config-examples/README.md。

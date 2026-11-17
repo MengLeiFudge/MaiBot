@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-reply-guard",
+  "version": "0.5.1",
+  "name": "QQBot 连发、引用与短回复",
+  "description": "收集主人私聊连续补充和同会话引用，保留本账号短回复的完整句子与标点。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [{"type": "plugin", "id": "mlj.qqbot-identity", "version_spec": ">=0.1.0,<0.2.0"}],
+  "capabilities": ["config.get", "config.get_plugin", "chat.get_stream_by_user_id", "message.get_recent", "message.get_by_id"],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}

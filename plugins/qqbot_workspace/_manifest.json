@@ -1,0 +1,21 @@
+{
+  "manifest_version": 2,
+  "id": "mlj.qqbot-workspace",
+  "version": "0.2.1",
+  "name": "风铃工作区与项目文件",
+  "description": "为主人私聊提供本机只读访问、个人工作区和风铃完整项目的文件读写。",
+  "author": {"name": "MLJ", "url": "https://github.com/MengLeiFudge"},
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/MengLeiFudge/qqbot",
+    "homepage": "https://github.com/MengLeiFudge/qqbot",
+    "issues": "https://github.com/MengLeiFudge/qqbot/issues"
+  },
+  "host_application": {"min_version": "1.2.3", "max_version": "1.2.3"},
+  "sdk": {"min_version": "2.8.0", "max_version": "2.99.99"},
+  "dependencies": [{"type": "plugin", "id": "mlj.qqbot-identity", "version_spec": ">=0.1.0,<0.2.0"}],
+  "capabilities": ["config.get", "config.get_plugin", "chat.get_stream_by_user_id",
+    "component.reload_plugin"],
+  "i18n": {"default_locale": "zh-CN", "supported_locales": ["zh-CN"]},
+  "plugin_type": "extension"
+}

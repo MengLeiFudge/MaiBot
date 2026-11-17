@@ -1,0 +1,28 @@
+[plugin]
+enabled = true
+config_version = "1.0.0"
+
+[diary]
+filter_mode = "whitelist"
+target_chats = []
+persona_override = "你是风铃，用第一人称记录当天真实的聊天、学习、兴趣和想法，不虚构线下行动。"
+style_extra = "记录真实日常，不引用私聊原话，不写他人身份、账号、联系方式或凭据，不编造经历。"
+
+[schedule]
+enabled = true
+time = "23:30"
+notify_chats = []
+catch_up_enabled = false
+catch_up_days = 3
+
+[qzone]
+enabled = false
+auto_cookie = true
+
+[llm]
+task_name = "utils"
+probe_max_tokens = false
+
+[security]
+admin_ids = []
+allow_all_users = false
