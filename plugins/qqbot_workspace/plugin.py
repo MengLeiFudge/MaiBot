@@ -111,33 +111,30 @@ class QQBotWorkspacePlugin(MaiBotPlugin):
                 self._closed = True
                 self.ctx.logger.warning("工作区启用状态或绑定已变化，文件入口已关闭；重启插件后重新注册范围。")
 
-    @HookHandler("chat.receive.after_process", mode=HookMode.BLOCKING, order=HookOrder.LATE, timeout_ms=8000)
-    async def bind_owner(self, message: Any = None, **_kwargs: Any) -> dict:
-        """首次主人私聊只保存真实会话，再重载以注册 Host 会话限制。"""
+    @HookHandler("maisaka.planner.before_request", name="qqbot_workspace_bind", mode=HookMode.BLOCKING, order=HookOrder.EARLY, timeout_ms=8000)
+    async def bind_owner(self, session_id: str = "", **_kwargs: Any) -> dict:
+        """等真实会话建立后核对主人私聊，再重载以注册 Host 会话限制。"""
         config = cast(WorkspaceConfig, self.config)
-        if not config.plugin.enabled or config.workspace.owner_session_id.strip() or not isinstance(message, Mapping):
+        if (not config.plugin.enabled or config.workspace.owner_session_id.strip() or self._closed
+                or not session_id or session_id == self._registered_session):
             return {"action": "continue"}
-        info = message.get("message_info") or {}
-        user = info.get("user_info") or {}
-        if message.get("platform") != "qq" or info.get("group_info"):
+        if await self.ctx.config.get("bot.qq_account", "") != "2629227874":
             return {"action": "continue"}
         identity = await self.ctx.config.get_plugin("mlj.qqbot-identity")
         owner = (identity.get("identity") or {}).get("owner_qq")
-        if not (identity.get("plugin") or {}).get("enabled") or not owner or user.get("user_id") != owner:
+        if (identity.get("plugin") or {}).get("enabled") is not True or not isinstance(owner, str) or not owner.isdecimal():
             return {"action": "continue"}
         stream = await self.ctx.chat.get_stream_by_user_id(owner, platform="qq")
-        if not isinstance(stream, Mapping) or stream.get("group_id") or stream.get("user_id") != owner:
+        if (not isinstance(stream, Mapping) or stream.get("platform") != "qq" or stream.get("group_id")
+                or stream.get("user_id") != owner or stream.get("stream_id") != session_id):
             return {"action": "continue"}
-        session = stream.get("stream_id")
-        if not isinstance(session, str) or not session or session != message.get("session_id"):
-            return {"action": "continue"}
-        if session == self._registered_session and not self._closed:
-            return {"action": "continue"}
+        session = session_id
         path = Path(self.ctx.paths.data_dir) / "owner_session.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps({"session_id": session}), encoding="utf-8")
         os.replace(temporary, path)
+        self.ctx.logger.info("已核对真实主人私聊并保存工作区绑定，正在重载文件工具。")
         async with asyncio.timeout(5):
             result = await self.ctx.call_capability("component.reload_plugin", plugin_name="mlj.qqbot-workspace")
         if not isinstance(result, Mapping) or not result.get("success"):

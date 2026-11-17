@@ -9,9 +9,11 @@
 
 ## 启用
 
-将 `config.example.toml` 复制为本机 `config.toml`，设置 `plugin.enabled = true`。`[workspace].owner_session_id` 可填写主人已有私聊的真实会话 ID；首次部署留空时，插件等待身份配置所确认的主人发来私聊，通过公开聊天 API 核对后保存本实例绑定并重载工具。绑定完成前不注册文件工具。不得填写 QQ、昵称或自行计算的 ID。本机配置和插件数据目录中的 `owner_session.json` 不进入 Git；更换主人或显式绑定后重启插件。
+将 `config.example.toml` 复制为本机 `config.toml`，设置 `plugin.enabled = true`。`[workspace].owner_session_id` 可填写主人已有私聊的真实会话 ID；首次部署留空时，插件在主人私聊会话建立后的首次规划请求前，通过公开聊天 API 核对真实主人会话，保存本实例绑定并重载工具。绑定完成前不注册文件工具。不得填写 QQ、昵称或自行计算的 ID。本机配置和插件数据目录中的 `owner_session.json` 不进入 Git；更换主人或显式绑定后重启插件。
 
 插件只在夜凛实例运行。Host 使用真实会话上下文将四个工具限制在绑定的私聊；每次调用还通过身份插件和公开聊天查询核对当前主人。该私聊的原生主动续聊也可以使用文件工具。群聊和其他私聊不开放电脑文件入口。Planner 和 Replyer 使用同一份权限说明；提示词约定新增功能由主人维护，项目设置及内容按主人后续指导处理。
+
+维护自动绑定时，必须使用会话已经建立后的规划请求 Hook。`chat.receive.after_process` 早于首次会话创建，不能在这里依赖公开聊天查询完成首次绑定。绑定成功须同时确认本实例 `owner_session.json` 已保存真实会话，以及重载后四个文件工具注册了该主人私聊的 Host 会话限制。
 
 ## 文件工具
 
