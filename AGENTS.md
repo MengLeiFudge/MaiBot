@@ -96,6 +96,6 @@ https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md
 
 本 fork 的行为修改遵守 QQBot 根 AGENTS 的框架核心边界，只使用本地插件、公开 SDK/Hook 与现有配置，不修改 Core、内置模块或已安装框架包。部署插件直接随本 fork 的 plugins/ 源码跟踪，不创建嵌套插件仓库。
 
-蓝铃是独立 bot，使用自己的工作目录、配置、虚拟环境、数据和插件启用选择，不参与棉花糖家族（目前云栖与夜凛）的插件同步，也不套用夜凛的插件允许列表。启动身份与端口来自本项目 config/bot_config.toml，示例见 deployment/config-examples/README.md。每次 Core 启动前执行 scripts/validate_plugin_config.py，配置无效时停止启动，不自动改写插件启用状态。插件与聊天插件管理入口的启用状态均通过本机配置独立维护。
+蓝铃（3600812036）是深海捡回来的蓝色鲸鱼娘，是主人最喜欢的机器人和伴侣。角色合同见根 docs/bot-roles.md。夜凛、蓝铃和风铃对齐十三个通用插件基础，清单见根 docs/chat-instances.md；蓝铃保留自己的专属模块与本机启用选择，不将专属状态复制给另外两位。各账号工作目录、配置、虚拟环境、数据、日记、记忆与个人工作区独立。身份与端口来自 config/bot_config.toml，示例见 deployment/config-examples/README.md。启动前执行 scripts/validate_plugin_config.py，配置无效时停止，不自动改写插件启用选择。
 
 本地运行配置和主人的真实 QQ 不进 Git；qqbot_identity 的 owner_qq 只填入本机插件 config.toml，示例留空。定向看图与身份的公开 Hook 限制见对应插件 README 和 deployment/config-examples/README.md。
